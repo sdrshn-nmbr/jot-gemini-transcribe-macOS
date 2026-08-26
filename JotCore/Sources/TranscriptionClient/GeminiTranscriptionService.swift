@@ -191,12 +191,11 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         }
     }
 
-    /// The dictionary's post-model half, in ONE place because it has four call
-    /// sites and an ORDER that matters: spelling rules first, snippet expansion
-    /// second. Reversing them lets a spelling rule rewrite the inside of a
-    /// freshly-inserted expansion — the user's own address, corrected into
-    /// something they never wrote. Same reasoning as sanitizedVocabulary(): both
-    /// halves of a guarantee go through one function so they cannot drift apart.
+    /// The dictionary's post-model half, in one place because it has four call
+    /// sites and an ORDER that matters: spelling rules first, expansion second.
+    /// Reversed, a spelling rule rewrites the inside of a freshly-inserted
+    /// expansion — the user's own address, corrected into something they never
+    /// wrote.
     static func applyDictionary(to text: String, _ dictionary: DictionaryStore = DictionaryStore()) -> String {
         let corrected = ReplacementEngine.apply(dictionary.replacementRules(), to: text)
         return ReplacementEngine.expand(dictionary.snippets(), in: corrected)

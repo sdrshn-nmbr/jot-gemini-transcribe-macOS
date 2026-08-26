@@ -29,12 +29,10 @@ public enum ReplacementEngine {
         }
     }
 
-    /// A spoken trigger that expands to arbitrary text ("my email address" →
-    /// the address itself). Distinct from `Rule`: a spelling rule corrects a word
-    /// the model misheard, a snippet substitutes something the user never said in
-    /// full. That difference drives two behaviours below — expansions are inserted
-    /// VERBATIM (no case propagation; "My number" must not Title-Case a phone
-    /// number), and they are never re-scanned.
+    /// A spoken trigger that expands to arbitrary text ("my email address" → the
+    /// address). A spelling rule corrects a word the model misheard; a snippet
+    /// substitutes something the user never said in full. Hence the two rules in
+    /// `expand`: verbatim insertion, and no re-scanning.
     public struct Snippet: Codable, Equatable, Sendable {
         public var trigger: String
         public var expansion: String
@@ -45,49 +43,50 @@ public enum ReplacementEngine {
         }
     }
 
-    /// Expands snippet triggers in one left-to-right pass over the ORIGINAL text.
+    /// Expands snippet triggers in one pass over the ORIGINAL text.
     ///
-    /// Single-pass is the whole point, not an optimisation. `apply` below rewrites
-    /// `result` once per rule, which is harmless for short spelling corrections but
-    /// not for snippets: an expansion is arbitrary user text, so a second rule —
-    /// or a second snippet — could match INSIDE freshly-inserted content and
-    /// corrupt it (expand "my email" to an address, then have a "gmail" rule chew
-    /// the domain). Matching against the original and copying the gaps makes that
-    /// structurally impossible.
+    /// Single-pass is the point, not an optimisation. `apply` rewrites `result`
+    /// once per rule, which is harmless for short spelling corrections but not
+    /// for snippets: an expansion is arbitrary user text, so a later rule could
+    /// match INSIDE freshly-inserted content and corrupt it — expand "my email"
+    /// to an address, then watch a "gmail" rule chew the domain. Matching the
+    /// original and copying the gaps makes that structurally impossible.
     ///
-    /// Longest trigger first so "my work email" beats "my email".
+    /// Expansions are inserted verbatim: `apply`'s case propagation would
+    /// Title-Case an address whenever its trigger opened a sentence.
     public static func expand(_ snippets: [Snippet], in text: String) -> String {
-        let usable = snippets.filter { !$0.trigger.isEmpty && !$0.expansion.isEmpty }
-        guard !usable.isEmpty else { return text }
-        // Leftmost-match is NSRegularExpression's; longest-at-a-position is ours,
-        // via alternation order (it prefers the earliest listed alternative).
-        let ordered = usable.sorted { $0.trigger.count > $1.trigger.count }
-        var expansions: [String: String] = [:]
-        for snippet in ordered where expansions[snippet.trigger.lowercased()] == nil {
-            expansions[snippet.trigger.lowercased()] = snippet.expansion
-        }
+        // Longest trigger first, so "my work email" beats "my email". Leftmost
+        // match is NSRegularExpression's; longest-at-a-position is ours, via
+        // alternation order — it prefers the earliest listed alternative.
+        let ordered = snippets
+            .filter { !$0.trigger.isEmpty && !$0.expansion.isEmpty }
+            .sorted { $0.trigger.count > $1.trigger.count }
+        guard !ordered.isEmpty else { return text }
+
+        let expansions = Dictionary(
+            ordered.map { ($0.trigger.lowercased(), $0.expansion) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // Same lookarounds as apply(): \b never matches when a trigger starts or
+        // ends in punctuation, and triggers are user-authored phrases.
         let alternation = ordered
             .map { NSRegularExpression.escapedPattern(for: $0.trigger) }
             .joined(separator: "|")
-        // Same lookarounds as apply(): \b never matches when a trigger starts or
-        // ends in punctuation, and triggers are user-authored phrases.
-        let pattern = "(?<![\\w])(?:\(alternation))(?![\\w])"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return text }
+        guard let regex = try? NSRegularExpression(
+            pattern: "(?<![\\w])(?:\(alternation))(?![\\w])",
+            options: [.caseInsensitive]
+        ) else { return text }
 
         var out = ""
         var cursor = text.startIndex
         for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             guard let range = Range(match.range, in: text) else { continue }
-            // A match inside a region we already emitted can't happen (matches are
-            // non-overlapping and ascending), but the guard keeps the copy honest.
-            guard range.lowerBound >= cursor else { continue }
+            let matched = text[range]
             out += text[cursor..<range.lowerBound]
-            let matched = String(text[range]).lowercased()
-            out += expansions[matched] ?? String(text[range])
+            out += expansions[matched.lowercased()] ?? String(matched)
             cursor = range.upperBound
         }
-        out += text[cursor...]
-        return out
+        return out + text[cursor...]
     }
 
     public static func apply(_ rules: [Rule], to text: String) -> String {

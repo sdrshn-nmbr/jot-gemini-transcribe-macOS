@@ -26,8 +26,7 @@ import Foundation
 ///   tier 3: text left on the clipboard, visible hint
 public struct InsertionCoordinator: TextInserting {
     private let paster: PasteInserter
-    /// Injectable for the same reason the coordinator injects its own settings
-    /// reads: a headless test must not depend on this machine's UserDefaults.
+    /// Injected so a headless test never depends on this machine's UserDefaults.
     private let dictateToClipboard: @MainActor () -> Bool
     private let keepOnClipboard: @MainActor () -> Bool
 
@@ -49,14 +48,12 @@ public struct InsertionCoordinator: TextInserting {
             return .blockedSecureField
         }
 
-        // Read once: a toggle flipped mid-insert must not have this text land
-        // under one rule and be cleaned up under another.
+        // Read once: a toggle flipped mid-insert must not leave this text placed
+        // under one rule and cleaned up under another.
         let keep = keepOnClipboard()
 
-        // Clipboard mode: the user asked for the transcript on the clipboard
-        // rather than at the cursor. Deliberately BELOW the secure-input guard —
-        // "put it somewhere I can paste it" must still never mean "copy what was
-        // typed over a password field".
+        // Below the secure-input guard on purpose: "put it somewhere I can paste
+        // it" must never mean "copy what was typed over a password field".
         if dictateToClipboard() {
             Log.insertion.info("clipboard mode — copying instead of inserting")
             paster.copyOnly(text, archivable: keep)
@@ -85,10 +82,9 @@ public struct InsertionCoordinator: TextInserting {
             paster.copyOnly(text, archivable: keep)
             return .frontmostChanged
         case .noEditableTarget:
-            // Nothing focused can take text. The ⌘V tier below would post into the
-            // void and return true — "delivery is best-effort" is honest about a
-            // real text field, but here we KNOW there isn't one, and reporting
-            // .inserted for that is the difference between best-effort and wrong.
+            // The ⌘V tier would post into the void and return true. "Delivery is
+            // best-effort" is honest about a real text field; claiming it when we
+            // know there ISN'T one is just wrong.
             paster.copyOnly(text, archivable: keep)
             return .fellBackToClipboard
         case .notPossible:

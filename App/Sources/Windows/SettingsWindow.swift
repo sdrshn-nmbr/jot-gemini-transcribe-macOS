@@ -324,7 +324,7 @@ struct DictationPane: View {
                 Toggle("Copy to clipboard instead of typing", isOn: $toClipboard)
                     .onChange(of: toClipboard) { _, enabled in settings.setDictateToClipboard(enabled) }
             } footer: {
-                Text("Keep leaves every transcript on the clipboard after typing it, so the last thing you said is always re-pasteable — at the cost of whatever you had copied before. Instead of typing skips insertion entirely: useful in remote desktops, VMs and canvas apps where nothing can be typed into. Either way Jot still copies on its own when it can see there's no text field to type into.")
+                Text("Keep leaves each transcript on the clipboard after typing it, so the last thing you said is always re-pasteable — at the cost of whatever you had copied before. Instead of typing skips insertion altogether, for remote desktops, VMs and canvas apps. Either way, Jot still copies on its own when it can see there's no text field to type into.")
             }
 
             Section {

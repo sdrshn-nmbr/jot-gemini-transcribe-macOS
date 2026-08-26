@@ -123,8 +123,8 @@ struct DictionaryView: View {
                             .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     }
                     if let expansion = entry.expansion, !expansion.isEmpty {
-                        // Newlines would let one multi-line signature push every
-                        // other row off the list.
+                        // Flattened, not just line-limited: a multi-line signature
+                        // would otherwise preview as its first line alone.
                         Text("say it → \(expansion.replacingOccurrences(of: "\n", with: " "))")
                             .font(JotUI.TypeScale.labelSmall(grad: grad))
                             .foregroundStyle(JotUI.Colors.primary)

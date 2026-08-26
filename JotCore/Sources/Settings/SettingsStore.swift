@@ -107,12 +107,10 @@ public struct SettingsStore: Sendable {
     }
 
     /// Send every dictation to the clipboard instead of the cursor. Off by
-    /// default — the whole point of the app is that the words land where you were
-    /// already typing. On, for the case the insertion ladder cannot serve: a
-    /// remote desktop, a VM, a canvas app, anywhere you want to choose the
-    /// destination yourself. Note this is a MODE, not the automatic fallback:
-    /// the ladder still diverts to the clipboard on its own when it can prove
-    /// there is nowhere to type.
+    /// default — the point of the app is that words land where you were already
+    /// typing. On for destinations the ladder cannot serve: remote desktops, VMs,
+    /// canvas apps. A MODE, not the automatic fallback — the ladder still diverts
+    /// on its own when it can prove there is nowhere to type.
     public var dictateToClipboard: Bool {
         Self.defaults.object(forKey: "dictateToClipboard") as? Bool ?? false
     }
@@ -122,10 +120,9 @@ public struct SettingsStore: Sendable {
     }
 
     /// Leave every transcript on the clipboard AFTER inserting it, so the last
-    /// dictation is always re-pasteable. Off by default because it has a real
-    /// cost: the clipboard is restored ~1s after a paste precisely so dictating
-    /// doesn't destroy what you had copied, and keeping the transcript means
-    /// giving that up.
+    /// dictation is always re-pasteable. Off by default because it has a cost:
+    /// the clipboard is restored ~1s after a paste precisely so dictating doesn't
+    /// destroy what you had copied, and keeping the transcript gives that up.
     public var keepOnClipboard: Bool {
         Self.defaults.object(forKey: "keepOnClipboard") as? Bool ?? false
     }

@@ -25,9 +25,9 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     public var term: String
     /// Optional misspelling the model tends to produce ("cooper netties").
     public var misspelling: String?
-    /// Optional expansion. Present ⇒ this entry is a snippet and `term` is the
-    /// phrase the user speaks. Optional so entries written by older builds decode
-    /// unchanged (synthesised Codable uses decodeIfPresent for optionals).
+    /// Present ⇒ this entry is a snippet and `term` is the phrase the user
+    /// speaks. Optional so entries written by older builds still decode
+    /// (synthesised Codable uses decodeIfPresent for optionals).
     public var expansion: String?
     public var starred: Bool
     public var createdAt: Date
@@ -121,11 +121,9 @@ public struct DictionaryStore: Sendable {
     /// a recogniser toward "cooper netties" is actively harmful, and spellings()
     /// sits close enough to be wired up by accident.
     ///
-    /// Snippet TRIGGERS ride along (they are terms, and the recogniser hearing
-    /// "my email address" cleanly is exactly what makes expansion fire). Snippet
-    /// EXPANSIONS never leave the machine — they are substituted locally, after
-    /// the response, so a dictionary full of addresses and phone numbers adds
-    /// nothing to what the request carries.
+    /// Snippet TRIGGERS ride along — the recogniser hearing "my email address"
+    /// cleanly is what makes expansion fire. EXPANSIONS never leave the machine;
+    /// they are substituted locally, after the response.
     public func sanitizedVocabulary(maxBytes: Int = 2_048) -> [String] {
         var used = 0
         var out: [String] = []
@@ -167,19 +165,13 @@ public struct DictionaryStore: Sendable {
         }
     }
 
-    /// Snippets for the ReplacementEngine's expansion pass (ALL entries carrying
-    /// one). Starred first so the longest-trigger tie-break is at least stable
-    /// against the same ordering the prompt inputs use.
+    /// Every entry carrying an expansion. Unordered on purpose — expand() sorts
+    /// by trigger length itself, and add() already rejects duplicate terms.
     public func snippets() -> [ReplacementEngine.Snippet] {
-        entries()
-            .sorted {
-                if $0.starred != $1.starred { return $0.starred }
-                return $0.createdAt > $1.createdAt
-            }
-            .compactMap { entry in
-                guard entry.isSnippet, let expansion = entry.expansion else { return nil }
-                return ReplacementEngine.Snippet(trigger: entry.term, expansion: expansion)
-            }
+        entries().compactMap { entry in
+            guard let expansion = entry.expansion, !expansion.isEmpty else { return nil }
+            return ReplacementEngine.Snippet(trigger: entry.term, expansion: expansion)
+        }
     }
 
     // MARK: - CSV (data portability)
@@ -243,9 +235,9 @@ public struct DictionaryStore: Sendable {
             let term = rawTerm.trimmingCharacters(in: .whitespacesAndNewlines)
             guard (1...60).contains(term.count), !seen.contains(term.lowercased()) else { continue }
             let misspelling = columns.count > 1 && !columns[1].isEmpty ? columns[1] : nil
-            // Over-long expansions are dropped to a plain term rather than
-            // rejecting the row: the user still gets the vocabulary hint, and a
-            // truncated address that looks right would be worse than none.
+            // Drop an over-long expansion rather than the whole row: the term is
+            // still a useful hint, and a truncated address that LOOKS right is
+            // worse than none.
             var expansion = columns.count > 2 && !columns[2].isEmpty ? columns[2] : nil
             if let candidate = expansion, candidate.count > DictionaryEntry.maxExpansionLength {
                 Log.ui.warning("dictionary import: expansion exceeded the cap — imported the term without it")

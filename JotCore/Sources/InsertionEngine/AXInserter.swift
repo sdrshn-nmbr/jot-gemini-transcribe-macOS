@@ -31,29 +31,24 @@ public enum AXInserter {
         /// PROVEN focus theft: the focused element belongs to a different app.
         /// A blind ⌘V would paste the transcript into the thief.
         case focusElsewhere
-        /// PROVEN absence of anywhere to type: nothing is focused, or focus sits
-        /// on an inert control. ⌘V here posts into the void and the ladder would
-        /// report success for text that landed nowhere — so the transcript goes
-        /// to the clipboard and the pill says so.
+        /// PROVEN inert target: focus sits on a control that cannot hold text.
+        /// ⌘V would post into the void and the ladder would report success for
+        /// text that landed nowhere.
         case noEditableTarget
     }
 
-    /// What the focused element tells us about whether typing can land.
     enum TargetVerdict: Equatable {
         case editable
-        /// Can't tell from AX — the paste tier is still the right guess. This is
-        /// the DEFAULT, and deliberately so: every app whose AX tree lies (the
-        /// Electron family) has to keep reaching ⌘V exactly as it does today.
+        /// Can't tell from AX. The DEFAULT, deliberately: every app whose AX tree
+        /// lies (the Electron family) must keep reaching ⌘V as it does today.
         case unknown
         case noEditableTarget
     }
 
-    /// Roles that cannot receive text under any app's AX quirks. Deliberately a
-    /// short list of leaf CONTROLS: containers (AXGroup, AXScrollArea, AXWebArea,
-    /// AXUnknown) are excluded because a contenteditable or a lying Electron
-    /// wrapper legitimately reports one while still accepting a paste. Being
-    /// wrong here costs the user a real insertion, so the bar is "inert control,
-    /// no argument".
+    /// Leaf controls that cannot hold text. Containers (AXGroup, AXScrollArea,
+    /// AXWebArea, AXUnknown) are excluded on purpose — a contenteditable or a
+    /// lying Electron wrapper reports one while still accepting a paste, and
+    /// being wrong here costs a real insertion.
     nonisolated static let inertRoles: Set<String> = [
         "AXButton", "AXRadioButton", "AXCheckBox", "AXPopUpButton",
         "AXMenuItem", "AXMenuBarItem", "AXMenuButton",
@@ -62,17 +57,15 @@ public enum AXInserter {
         "AXColorWell", "AXStepper", "AXIncrementor",
     ]
 
-    /// Pure decision, `nonisolated` so it is exercised headlessly — the live AX
-    /// tree is the one thing a unit test cannot stand up.
+    /// `nonisolated` so it is testable headlessly — the live AX tree is the one
+    /// thing a unit test cannot stand up.
     ///
-    /// `settable` outranks role: a settable kAXSelectedTextAttribute IS the
-    /// definition of somewhere text can go, whatever the element calls itself.
+    /// `settable` outranks role: a settable kAXSelectedTextAttribute IS somewhere
+    /// text can go, whatever the element calls itself. A readable value with an
+    /// unsettable selection is an editor we just can't drive — paste may work.
     nonisolated static func classifyTarget(role: String?, settable: Bool, hasStringValue: Bool) -> TargetVerdict {
         if settable { return .editable }
-        guard let role else { return .unknown }
-        // A value plus a non-settable selection is an editor we simply can't
-        // drive through AX (read-only view, or a quirky one) — paste may work.
-        if hasStringValue { return .unknown }
+        guard let role, !hasStringValue else { return .unknown }
         return inertRoles.contains(role) ? .noEditableTarget : .unknown
     }
 
@@ -121,11 +114,8 @@ public enum AXInserter {
         var settable = DarwinBoolean(false)
         AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
 
-        // Focus on an inert control means ⌘V has nowhere to go. Saying so here is
-        // what stops the ladder reporting `.inserted` for text that landed
-        // nowhere; the coordinator turns this into the clipboard + a visible chip.
         if case .noEditableTarget = classifyTarget(role: role, settable: settable.boolValue, hasStringValue: before != nil) {
-            Log.insertion.info("focus is an inert \(role ?? "?", privacy: .public) — no text destination; clipboard instead of a blind ⌘V")
+            Log.insertion.info("focus is an inert \(role ?? "?", privacy: .public) — clipboard instead of a blind ⌘V")
             return .noEditableTarget
         }
 

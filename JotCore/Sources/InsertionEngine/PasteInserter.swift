@@ -47,11 +47,10 @@ public final class PasteInserter {
     /// background task so the session isn't pinned in .inserting for a second
     /// after the text visibly landed (production pass 2, P0: the next dictation's
     /// begin was silently rejected in that window).
-    /// `keepingOnClipboard` is the user asking for every dictation to stay
-    /// pasteable afterwards. It suppresses the restore below — which means their
-    /// previous clipboard does NOT come back, the deliberate cost of the setting —
-    /// and drops the transient markers, because a transcript the user asked to
-    /// keep is one their clipboard manager should be allowed to archive.
+    /// `keepingOnClipboard` suppresses the restore below, so the transcript stays
+    /// pasteable and the previous clipboard does NOT come back — the deliberate
+    /// cost of the setting. It also drops the transient markers: a transcript the
+    /// user asked to keep is one their clipboard manager should be allowed to see.
     public func paste(_ text: String, keepingOnClipboard: Bool = false) async -> Bool {
         restoreTask?.cancel()
         let pasteboard = NSPasteboard.general

@@ -26,10 +26,14 @@ import Foundation
 ///   tier 3: text left on the clipboard, visible hint
 public struct InsertionCoordinator: TextInserting {
     private let paster: PasteInserter
+    /// Injectable for the same reason the coordinator injects its own settings
+    /// reads: a headless test must not depend on this machine's UserDefaults.
+    private let dictateToClipboard: @MainActor () -> Bool
 
     @MainActor
-    public init() {
+    public init(dictateToClipboard: @escaping @MainActor () -> Bool = { SettingsStore().dictateToClipboard }) {
         self.paster = PasteInserter()
+        self.dictateToClipboard = dictateToClipboard
     }
 
     @MainActor
@@ -38,6 +42,16 @@ public struct InsertionCoordinator: TextInserting {
         if SecureInput.isActive {
             Log.insertion.warning("secure input active at insert time — refusing (text in History only)")
             return .blockedSecureField
+        }
+
+        // Clipboard mode: the user asked for the transcript on the clipboard
+        // rather than at the cursor. Deliberately BELOW the secure-input guard —
+        // "put it somewhere I can paste it" must still never mean "copy what was
+        // typed over a password field".
+        if dictateToClipboard() {
+            Log.insertion.info("clipboard mode — copying instead of inserting")
+            paster.copyOnly(text)
+            return .fellBackToClipboard
         }
 
         // Guard 1: is the user still where they started dictating?
@@ -58,6 +72,13 @@ public struct InsertionCoordinator: TextInserting {
             // Same treatment as the frontmost-changed guard: chip, never blind.
             paster.copyOnly(text)
             return .frontmostChanged
+        case .noEditableTarget:
+            // Nothing focused can take text. The ⌘V tier below would post into the
+            // void and return true — "delivery is best-effort" is honest about a
+            // real text field, but here we KNOW there isn't one, and reporting
+            // .inserted for that is the difference between best-effort and wrong.
+            paster.copyOnly(text)
+            return .fellBackToClipboard
         case .notPossible:
             break
         }

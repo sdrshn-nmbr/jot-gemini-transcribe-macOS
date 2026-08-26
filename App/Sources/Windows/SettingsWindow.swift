@@ -304,6 +304,7 @@ struct DictationPane: View {
     @State private var cleanupPass = SettingsStore().smartCleanupPassEnabled
     @State private var showIdleDot = SettingsStore().showIdleIndicator
     @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
+    @State private var toClipboard = SettingsStore().dictateToClipboard
 
     var body: some View {
         Form {
@@ -314,6 +315,13 @@ struct DictationPane: View {
                     .onChange(of: showIdleDot) { _, show in settings.setShowIdleIndicator(show) }
             } footer: {
                 Text("The resting dot grows into a Dictate button on hover; click it for hands-free. Off = the pill appears only while dictating.")
+            }
+
+            Section {
+                Toggle("Copy to clipboard instead of typing", isOn: $toClipboard)
+                    .onChange(of: toClipboard) { _, enabled in settings.setDictateToClipboard(enabled) }
+            } footer: {
+                Text("Every dictation lands on the clipboard for you to paste. Useful in remote desktops, VMs and canvas apps where nothing can be typed into. Off = Jot still copies on its own whenever it can see there's no text field to type into.")
             }
 
             Section {

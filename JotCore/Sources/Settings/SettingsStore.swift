@@ -106,6 +106,21 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "soundsEnabled")
     }
 
+    /// Send every dictation to the clipboard instead of the cursor. Off by
+    /// default — the whole point of the app is that the words land where you were
+    /// already typing. On, for the case the insertion ladder cannot serve: a
+    /// remote desktop, a VM, a canvas app, anywhere you want to choose the
+    /// destination yourself. Note this is a MODE, not the automatic fallback:
+    /// the ladder still diverts to the clipboard on its own when it can prove
+    /// there is nowhere to type.
+    public var dictateToClipboard: Bool {
+        Self.defaults.object(forKey: "dictateToClipboard") as? Bool ?? false
+    }
+
+    public func setDictateToClipboard(_ enabled: Bool) {
+        Self.set(enabled, forKey: "dictateToClipboard")
+    }
+
     public var hotkeyKey: HotkeyKey {
         (Self.defaults.string(forKey: "hotkeyKey")).flatMap(HotkeyKey.init(rawValue:)) ?? .fn
     }

@@ -31,6 +31,49 @@ public enum AXInserter {
         /// PROVEN focus theft: the focused element belongs to a different app.
         /// A blind ⌘V would paste the transcript into the thief.
         case focusElsewhere
+        /// PROVEN absence of anywhere to type: nothing is focused, or focus sits
+        /// on an inert control. ⌘V here posts into the void and the ladder would
+        /// report success for text that landed nowhere — so the transcript goes
+        /// to the clipboard and the pill says so.
+        case noEditableTarget
+    }
+
+    /// What the focused element tells us about whether typing can land.
+    enum TargetVerdict: Equatable {
+        case editable
+        /// Can't tell from AX — the paste tier is still the right guess. This is
+        /// the DEFAULT, and deliberately so: every app whose AX tree lies (the
+        /// Electron family) has to keep reaching ⌘V exactly as it does today.
+        case unknown
+        case noEditableTarget
+    }
+
+    /// Roles that cannot receive text under any app's AX quirks. Deliberately a
+    /// short list of leaf CONTROLS: containers (AXGroup, AXScrollArea, AXWebArea,
+    /// AXUnknown) are excluded because a contenteditable or a lying Electron
+    /// wrapper legitimately reports one while still accepting a paste. Being
+    /// wrong here costs the user a real insertion, so the bar is "inert control,
+    /// no argument".
+    nonisolated static let inertRoles: Set<String> = [
+        "AXButton", "AXRadioButton", "AXCheckBox", "AXPopUpButton",
+        "AXMenuItem", "AXMenuBarItem", "AXMenuButton",
+        "AXImage", "AXSlider", "AXProgressIndicator", "AXValueIndicator",
+        "AXStaticText", "AXToolbar", "AXTabGroup", "AXDisclosureTriangle",
+        "AXColorWell", "AXStepper", "AXIncrementor",
+    ]
+
+    /// Pure decision, `nonisolated` so it is exercised headlessly — the live AX
+    /// tree is the one thing a unit test cannot stand up.
+    ///
+    /// `settable` outranks role: a settable kAXSelectedTextAttribute IS the
+    /// definition of somewhere text can go, whatever the element calls itself.
+    nonisolated static func classifyTarget(role: String?, settable: Bool, hasStringValue: Bool) -> TargetVerdict {
+        if settable { return .editable }
+        guard let role else { return .unknown }
+        // A value plus a non-settable selection is an editor we simply can't
+        // drive through AX (read-only view, or a quirky one) — paste may work.
+        if hasStringValue { return .unknown }
+        return inertRoles.contains(role) ? .noEditableTarget : .unknown
     }
 
     public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?) async -> Result {
@@ -64,19 +107,31 @@ public enum AXInserter {
             }
         }
 
-        // Never write into secure fields.
         var roleRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
-           let role = roleRef as? String, role == "AXSecureTextField" {
+        let role: String? = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success
+            ? roleRef as? String
+            : nil
+        // Never write into secure fields — and never divert one to the clipboard
+        // either, so this stays ahead of the target check below (F18).
+        if role == "AXSecureTextField" {
             return .notPossible
+        }
+
+        let before = stringValue(of: element)
+        var settable = DarwinBoolean(false)
+        AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
+
+        // Focus on an inert control means ⌘V has nowhere to go. Saying so here is
+        // what stops the ladder reporting `.inserted` for text that landed
+        // nowhere; the coordinator turns this into the clipboard + a visible chip.
+        if case .noEditableTarget = classifyTarget(role: role, settable: settable.boolValue, hasStringValue: before != nil) {
+            Log.insertion.info("focus is an inert \(role ?? "?", privacy: .public) — no text destination; clipboard instead of a blind ⌘V")
+            return .noEditableTarget
         }
 
         // Readable value is the precondition for verification; without it we cannot
         // prove the insert landed, so we fall to paste rather than risk a double.
-        guard let before = stringValue(of: element) else { return .notPossible }
-
-        var settable = DarwinBoolean(false)
-        AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
+        guard let before else { return .notPossible }
         guard settable.boolValue else { return .notPossible }
         guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success else {
             return .notPossible

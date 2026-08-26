@@ -29,6 +29,67 @@ public enum ReplacementEngine {
         }
     }
 
+    /// A spoken trigger that expands to arbitrary text ("my email address" →
+    /// the address itself). Distinct from `Rule`: a spelling rule corrects a word
+    /// the model misheard, a snippet substitutes something the user never said in
+    /// full. That difference drives two behaviours below — expansions are inserted
+    /// VERBATIM (no case propagation; "My number" must not Title-Case a phone
+    /// number), and they are never re-scanned.
+    public struct Snippet: Codable, Equatable, Sendable {
+        public var trigger: String
+        public var expansion: String
+
+        public init(trigger: String, expansion: String) {
+            self.trigger = trigger
+            self.expansion = expansion
+        }
+    }
+
+    /// Expands snippet triggers in one left-to-right pass over the ORIGINAL text.
+    ///
+    /// Single-pass is the whole point, not an optimisation. `apply` below rewrites
+    /// `result` once per rule, which is harmless for short spelling corrections but
+    /// not for snippets: an expansion is arbitrary user text, so a second rule —
+    /// or a second snippet — could match INSIDE freshly-inserted content and
+    /// corrupt it (expand "my email" to an address, then have a "gmail" rule chew
+    /// the domain). Matching against the original and copying the gaps makes that
+    /// structurally impossible.
+    ///
+    /// Longest trigger first so "my work email" beats "my email".
+    public static func expand(_ snippets: [Snippet], in text: String) -> String {
+        let usable = snippets.filter { !$0.trigger.isEmpty && !$0.expansion.isEmpty }
+        guard !usable.isEmpty else { return text }
+        // Leftmost-match is NSRegularExpression's; longest-at-a-position is ours,
+        // via alternation order (it prefers the earliest listed alternative).
+        let ordered = usable.sorted { $0.trigger.count > $1.trigger.count }
+        var expansions: [String: String] = [:]
+        for snippet in ordered where expansions[snippet.trigger.lowercased()] == nil {
+            expansions[snippet.trigger.lowercased()] = snippet.expansion
+        }
+        let alternation = ordered
+            .map { NSRegularExpression.escapedPattern(for: $0.trigger) }
+            .joined(separator: "|")
+        // Same lookarounds as apply(): \b never matches when a trigger starts or
+        // ends in punctuation, and triggers are user-authored phrases.
+        let pattern = "(?<![\\w])(?:\(alternation))(?![\\w])"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return text }
+
+        var out = ""
+        var cursor = text.startIndex
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let range = Range(match.range, in: text) else { continue }
+            // A match inside a region we already emitted can't happen (matches are
+            // non-overlapping and ascending), but the guard keeps the copy honest.
+            guard range.lowerBound >= cursor else { continue }
+            out += text[cursor..<range.lowerBound]
+            let matched = String(text[range]).lowercased()
+            out += expansions[matched] ?? String(text[range])
+            cursor = range.upperBound
+        }
+        out += text[cursor...]
+        return out
+    }
+
     public static func apply(_ rules: [Rule], to text: String) -> String {
         guard !rules.isEmpty else { return text }
         var result = text

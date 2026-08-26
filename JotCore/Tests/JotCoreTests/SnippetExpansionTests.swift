@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import AppKit
 import XCTest
 @testable import JotCore
 
@@ -220,6 +221,48 @@ final class DictionaryEntryWireFormatTests: XCTestCase {
         let data = try JSONEncoder().encode([original])
         let restored = try JSONDecoder().decode([DictionaryEntry].self, from: data)
         XCTAssertEqual(restored.first, original)
+    }
+}
+
+/// Keeping a transcript around is a marker decision, not just a write: the
+/// transient type is what tells a clipboard manager to skip it, so "keep it so I
+/// can reuse it" has to drop that marker or the manager the user relies on will
+/// throw the transcript away for them.
+@MainActor
+final class ClipboardRetentionTests: XCTestCase {
+    private let transient = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+
+    /// The suite runs against the real general pasteboard — put back whatever
+    /// the developer had copied.
+    private func withRestoredClipboard(_ body: () -> Void) {
+        let previous = NSPasteboard.general.string(forType: .string)
+        body()
+        NSPasteboard.general.clearContents()
+        if let previous {
+            NSPasteboard.general.setString(previous, forType: .string)
+        }
+    }
+
+    func testCopyOnlyMarksTranscriptsTransientByDefault() {
+        withRestoredClipboard {
+            PasteInserter().copyOnly("a transcript")
+            XCTAssertEqual(NSPasteboard.general.string(forType: .string), "a transcript")
+            XCTAssertNotNil(
+                NSPasteboard.general.pasteboardItems?.first?.string(forType: transient),
+                "audit L22: managers must skip transcripts unless asked otherwise"
+            )
+        }
+    }
+
+    func testArchivableCopyDropsTheTransientMarker() {
+        withRestoredClipboard {
+            PasteInserter().copyOnly("a transcript", archivable: true)
+            XCTAssertEqual(NSPasteboard.general.string(forType: .string), "a transcript")
+            XCTAssertNil(
+                NSPasteboard.general.pasteboardItems?.first?.string(forType: transient),
+                "the user asked to keep this one — their clipboard manager should see it"
+            )
+        }
     }
 }
 

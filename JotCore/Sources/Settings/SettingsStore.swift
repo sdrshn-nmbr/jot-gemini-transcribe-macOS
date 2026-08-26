@@ -121,6 +121,19 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "dictateToClipboard")
     }
 
+    /// Leave every transcript on the clipboard AFTER inserting it, so the last
+    /// dictation is always re-pasteable. Off by default because it has a real
+    /// cost: the clipboard is restored ~1s after a paste precisely so dictating
+    /// doesn't destroy what you had copied, and keeping the transcript means
+    /// giving that up.
+    public var keepOnClipboard: Bool {
+        Self.defaults.object(forKey: "keepOnClipboard") as? Bool ?? false
+    }
+
+    public func setKeepOnClipboard(_ enabled: Bool) {
+        Self.set(enabled, forKey: "keepOnClipboard")
+    }
+
     public var hotkeyKey: HotkeyKey {
         (Self.defaults.string(forKey: "hotkeyKey")).flatMap(HotkeyKey.init(rawValue:)) ?? .fn
     }

@@ -183,6 +183,46 @@ final class DictionarySnippetStoreTests: XCTestCase {
     }
 }
 
+/// The stored shape. `expansion` was added to a struct that is already on disk
+/// in every existing install, so the old form has to keep decoding — a throw
+/// here empties somebody's dictionary on upgrade.
+final class DictionaryEntryWireFormatTests: XCTestCase {
+    private func decode(_ json: String) throws -> [DictionaryEntry] {
+        try JSONDecoder().decode([DictionaryEntry].self, from: Data(json.utf8))
+    }
+
+    func testDecodesEntriesWrittenBeforeExpansionExisted() throws {
+        let legacy = """
+        [{"id":"1B4E28BA-2FA1-11D2-883F-B9A761BDE3FB","term":"Kubernetes",\
+        "misspelling":"cooper netties","starred":false,"createdAt":800000000.0}]
+        """
+        let entries = try decode(legacy)
+        XCTAssertEqual(entries.first?.term, "Kubernetes")
+        XCTAssertNil(entries.first?.expansion)
+        XCTAssertFalse(entries.first?.isSnippet ?? true)
+    }
+
+    func testDecodesASnippetEntry() throws {
+        let stored = """
+        [{"id":"1B4E28BA-2FA1-11D2-883F-B9A761BDE3FB","term":"my email address",\
+        "expansion":"dev@example.com","starred":true,"createdAt":800000000.0}]
+        """
+        let entry = try XCTUnwrap(decode(stored).first)
+        XCTAssertEqual(entry.expansion, "dev@example.com")
+        XCTAssertTrue(entry.isSnippet)
+        XCTAssertNil(entry.misspelling)
+    }
+
+    /// Round-tripping through the encoder must produce something the decoder
+    /// accepts — the guard against a future field being added non-optionally.
+    func testRoundTripsThroughItsOwnEncoder() throws {
+        let original = DictionaryEntry(term: "my number", expansion: "(720) 555-0134")
+        let data = try JSONEncoder().encode([original])
+        let restored = try JSONDecoder().decode([DictionaryEntry].self, from: data)
+        XCTAssertEqual(restored.first, original)
+    }
+}
+
 /// The clipboard half: can text land where the user is pointing?
 final class EditableTargetTests: XCTestCase {
     /// Settable outranks role. Whatever an element calls itself, a settable

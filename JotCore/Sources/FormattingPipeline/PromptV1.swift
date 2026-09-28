@@ -58,7 +58,8 @@ public enum PromptV1 {
         case "com.apple.dt.Xcode", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
              "com.googlecode.iterm2", "com.apple.Terminal", "dev.warp.Warp-Stable",
              "com.exafunction.windsurf", "com.google.android.studio", "com.jetbrains.intellij",
-             "com.anthropic.claudefordesktop":
+             "com.anthropic.claudefordesktop", "com.mitchellh.ghostty", "com.openai.codex",
+             "dev.zed.Zed":
             return .code
         default:
             return .neutral
@@ -70,6 +71,7 @@ public enum PromptV1 {
     public static func cleanupPrompt(
         raw: String,
         tone: ToneCategory,
+        style: String? = nil,
         vocabulary: [String] = [],
         spellings: [(wrong: String, right: String)] = []
     ) -> String {
@@ -93,6 +95,9 @@ public enum PromptV1 {
         sections.append(examples)
         if !tone.block.isEmpty {
             sections.append(tone.block)
+        }
+        if let style {
+            sections.append(style)
         }
         sections.append("RAW: \(raw)\nCLEAN:")
         return sections.joined(separator: "\n\n")

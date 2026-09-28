@@ -310,6 +310,8 @@ struct DictationPane: View {
 
     var body: some View {
         Form {
+            StyleSections()
+
             Section {
                 Toggle("Sounds", isOn: $sounds)
                     .onChange(of: sounds) { _, enabled in settings.setSoundsEnabled(enabled) }

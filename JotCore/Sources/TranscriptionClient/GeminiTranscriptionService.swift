@@ -201,12 +201,18 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         return ReplacementEngine.expand(dictionary.snippets(), in: corrected)
     }
 
-    private func cleanupOrFallback(raw: String, context: DictationContext, config: GeminiConfig) async -> String {
+    /// `fallback` is what gets inserted when the model is unavailable or its
+    /// output fails the gate; the local path passes its own formatted text.
+    func cleanupOrFallback(
+        raw: String, fallback: String? = nil, context: DictationContext,
+        config: GeminiConfig, style: String? = nil
+    ) async -> String {
         let tone = PromptV1.toneCategory(forBundleID: context.targetAppBundleID)
         let dictionary = DictionaryStore()
         let prompt = PromptV1.cleanupPrompt(
             raw: raw,
             tone: tone,
+            style: style,
             vocabulary: dictionary.sanitizedVocabulary(),
             spellings: dictionary.spellings()
         )
@@ -221,7 +227,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                 let trips = settings.recordGateTrip()
                 Log.transcription.warning("cleanup gate REJECTED (\(verdict.reason ?? "?", privacy: .public), trip #\(trips) in 24h) — inserting raw")
                 autoDegradeIfNeeded(trips: trips)
-                return Self.applyDictionary(to: raw, dictionary)
+                return Self.applyDictionary(to: fallback ?? raw, dictionary)
             }
             // The dictionary's hard guarantee: explicit wrong→right rules always win.
             return Self.applyDictionary(to: cleaned, dictionary)
@@ -229,7 +235,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             // Deadline miss / network hiccup on cleanup never costs the dictation —
             // and the dictionary guarantee still holds (audit L9).
             Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")
-            return Self.applyDictionary(to: raw, dictionary)
+            return Self.applyDictionary(to: fallback ?? raw, dictionary)
         }
     }
 

@@ -28,7 +28,7 @@ final class DictationController {
     private let engine = EventTapEngine(key: .fn)
     private let hud = PillHUDController()
     private let earcons = EarconPlayer()
-    private let transcriptionService: GeminiTranscriptionService
+    private let transcriptionService: HybridTranscriptionService
     private let historyStore: HistoryStore?
     private var recoveryScanner: RecoveryScanner?
     private var retryQueue: RetryQueue?
@@ -54,7 +54,7 @@ final class DictationController {
     @MainActor
     private static func makeLiveSession() -> LiveTranscribing? {
         let settings = SettingsStore()
-        guard settings.liveTranscriptionActive else { return nil }
+        guard settings.liveTranscriptionActive, settings.transcriptionEngine == .gemini else { return nil }
         // A live path that is reliably broken is worse than one that is off: every
         // attempt costs a handshake and then the full upload anyway, so the user
         // pays latency on every dictation for a feature that never delivers. Stop
@@ -88,7 +88,7 @@ final class DictationController {
     init() {
         KeychainStore.migrateDevKeyFileIfPresent()
         let client = GeminiClient(apiKey: { KeychainStore.loadAPIKey() })
-        let service = GeminiTranscriptionService(client: client)
+        let service = HybridTranscriptionService(gemini: GeminiTranscriptionService(client: client))
         transcriptionService = service
         historyStore = try? HistoryStore.standard()
         coordinator = DictationCoordinator(
@@ -122,6 +122,9 @@ final class DictationController {
     }
 
     func start() {
+        if SettingsStore().transcriptionEngine == .local {
+            Task.detached(priority: .utility) { _ = try? await ParakeetEngine.shared.prepare() }
+        }
         applyHotkeySettings()
         // Intents flow through one AsyncStream consumed sequentially — independent
         // Task hops have no ordering guarantee under load (audit L35).

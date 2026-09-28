@@ -99,13 +99,14 @@ public actor GeminiClient {
     /// Text-only cleanup call (flash-lite class, thinking minimized).
     /// The thinking knob differs by model generation (probed live):
     ///  - gemini-2.x: `thinkingConfig.thinkingBudget: 0`
-    ///  - gemini-3.x+: `thinkingConfig.thinkingLevel: "low"` (thinkingBudget → 400;
-    ///    bare/top-level thinkingLevel → 400; "low" measured faster and more
-    ///    consistent than "minimal" on our eval set)
+    ///  - gemini-3.x+: `thinkingConfig.thinkingLevel: "minimal"` (thinkingBudget → 400;
+    ///    bare/top-level thinkingLevel → 400). On 12 real dictations "minimal"
+    ///    measured p50 836 ms / p90 1069 ms against "low" at 873 / 1546, and
+    ///    "low" sometimes left a next-sentence self-correction unapplied.
     public func cleanup(prompt: String, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
         let thinkingConfig: [String: Any] = model.hasPrefix("gemini-2")
             ? ["thinkingBudget": 0]
-            : ["thinkingLevel": "low"]
+            : ["thinkingLevel": "minimal"]
         let body: [String: Any] = [
             "contents": [[
                 "role": "user",

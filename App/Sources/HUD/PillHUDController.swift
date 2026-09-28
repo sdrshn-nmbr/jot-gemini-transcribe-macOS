@@ -26,7 +26,7 @@ final class PillHUDController {
 
     init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 96),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 280),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
@@ -73,7 +73,7 @@ final class PillHUDController {
         let frame = screen.visibleFrame
         panel.setFrameOrigin(NSPoint(
             x: frame.midX - panel.frame.width / 2,
-            y: frame.minY + 16
+            y: frame.minY
         ))
     }
 
@@ -112,6 +112,6 @@ private struct PillRootView: View {
             PillView(model: model)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
     }
 }

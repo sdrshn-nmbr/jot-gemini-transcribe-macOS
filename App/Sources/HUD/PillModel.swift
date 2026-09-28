@@ -27,10 +27,14 @@ enum PillState: Equatable {
     case notice(String)
     /// Error styling: errorContainer surface + "saved to History" framing.
     case error(String)
+    /// The transcript had nowhere to go: show it with a Copy button.
+    case transcript(String)
 }
 
 @MainActor
 final class PillModel: ObservableObject {
+    static let transcriptTimeout: TimeInterval = 10
+
     @Published var state: PillState = .idleDot
     @Published var level: Float = 0
     @Published var elapsed: TimeInterval = 0

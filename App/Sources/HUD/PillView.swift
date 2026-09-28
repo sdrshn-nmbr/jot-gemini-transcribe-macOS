@@ -12,35 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import SwiftUI
+import AppKit
 import JotCore
+import SwiftUI
 
-/// The pill — geometry, states, and transitions per docs/design/experience.md §1.
-/// Heights 48pt (full pill), state-specific widths, M3 motion tokens throughout:
-/// spatial springs move things, effects springs fade things, expressive springs
-/// only on hero moments (appear, lock, success).
+/// Wispr Flow's bar, measured from its stylesheet: a 30pt black capsule with a
+/// 1pt #30302f edge. 73pt wide while holding, 102.5pt hands-free, 98pt while
+/// processing; a 40×8 translucent sliver at rest that opens to 50×30 on hover.
+enum Flow {
+    static let ink = Color.black
+    static let edge = Color(red: 0x30 / 255, green: 0x30 / 255, blue: 0x2f / 255)
+    static let edgeHover = Color(red: 0x5b / 255, green: 0x5b / 255, blue: 0x59 / 255)
+    static let text = Color(red: 0xb3 / 255, green: 0xb2 / 255, blue: 0xad / 255)
+    static let hint = Color(red: 0xfc / 255, green: 0xfc / 255, blue: 0xfb / 255).opacity(0.4)
+    static let button = Color(red: 0x5b / 255, green: 0x5b / 255, blue: 0x59 / 255)
+    static let buttonText = Color(red: 0xfc / 255, green: 0xfc / 255, blue: 0xfb / 255)
+    static let destructive = Color(red: 0xee / 255, green: 0x6a / 255, blue: 0x6a / 255)
+    static let height: CGFloat = 30
+    static let morph = Animation.timingCurve(0.05, 0.6, 0.4, 0.95, duration: 0.18)
+    static let spring = Animation.spring(response: 0.42, dampingFraction: 0.82)
+}
+
 struct PillView: View {
     @ObservedObject var model: PillModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         content
-            .animation(spatial, value: model.state)
-            // States with real controls (Dictate dot, Stop button) must expose
-            // their children or VoiceOver users can't stop a locked recording.
+            .animation(reduceMotion ? .linear(duration: 0.12) : Flow.spring, value: model.state)
             .accessibilityElement(children: hasInteractiveControls ? .contain : .ignore)
             .accessibilityLabel(accessibilityDescription)
     }
 
     private var hasInteractiveControls: Bool {
         switch model.state {
-        case .idleDot, .listening(locked: true): return true
+        case .idleDot, .listening(locked: true), .transcript: return true
         default: return false
         }
-    }
-
-    private var spatial: Animation {
-        reduceMotion ? .linear(duration: 0.15) : JotMotion.expressiveDefaultSpatial
     }
 
     @ViewBuilder
@@ -49,90 +57,39 @@ struct PillView: View {
         case .hidden:
             EmptyView()
 
-        case .idleDot:
-            IdleDotView()
-                .padding(.vertical, 20) // stable panel hit area
+        case .idleDot, .success:
+            RestingBar()
 
         case .listening(let locked):
-            // Live mode: the pill grows to carry the words as they arrive. Capped
-            // and tail-anchored so a long dictation scrolls rather than pushing
-            // the panel past its bounds.
-            pillSurface(width: model.partial.isEmpty ? (locked ? 268 : 200) : 520) {
-                HStack(spacing: JotUI.Spacing.s) {
-                    if locked {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                        Text(timerText)
-                            .font(JotUI.TypeScale.numeric())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                    } else if model.elapsed >= 10 {
-                        Text(timerText)
-                            .font(JotUI.TypeScale.numeric())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+            if model.partial.isEmpty {
+                bar(width: locked ? 102.5 : 73) {
+                    HStack(spacing: 10) {
+                        WaveformView(level: model.level, processing: false)
+                        if locked { stopButton }
                     }
-                    WaveformView(level: model.level, processing: false)
-                    if !model.partial.isEmpty {
-                        Text(model.partial)
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                            .lineLimit(1)
-                            .truncationMode(.head) // the newest words matter most
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            // The text changes at token cadence; animating each
-                            // change would make it jitter continuously.
-                            .animation(nil, value: model.partial)
-                            .accessibilityHidden(true) // VoiceOver must not read a moving guess
-                            // Sweeps once when the finished text lands.
-                            .geminiSweep(trigger: model.corrected)
-                    }
-                    if locked {
-                        stopButton
+                }
+            } else {
+                bar(width: 420) {
+                    HStack(spacing: 10) {
+                        WaveformView(level: model.level, processing: false)
+                        partialText
+                        if locked { stopButton }
                     }
                 }
             }
 
         case .processing:
-            // In live mode the sentence is already on screen, so keep it there.
-            // Swapping it for generic bars at key-up throws away the words the
-            // user just watched arrive AND removes the thing the correction is
-            // about to happen to — the sweep fires on text that is no longer
-            // rendered, so the moment is invisible. The batch path has no partial
-            // and still gets the bars, unchanged.
             if model.partial.isEmpty {
-                pillSurface(width: model.slow ? 220 : 132) {
-                    HStack(spacing: JotUI.Spacing.s) {
-                        WaveformView(level: 0, processing: true)
-                        if model.slow {
-                            Text("Still working…")
-                                .font(JotUI.TypeScale.label())
-                                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                                .transition(.opacity)
-                        }
-                    }
+                bar(width: 98) {
+                    WaveformView(level: 0, processing: true)
                 }
             } else {
-                pillSurface(width: 520) {
-                    HStack(spacing: JotUI.Spacing.s) {
-                        // A small four-colour tick keeps "working" legible while
-                        // the sentence holds its place.
+                bar(width: 420) {
+                    HStack(spacing: 10) {
                         WaveformView(level: 0, processing: true)
-                            .frame(width: 34)
                         if model.correction.isEmpty {
-                            Text(model.partial)
-                                .font(JotUI.TypeScale.labelSmall())
-                                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .animation(nil, value: model.partial)
-                                .accessibilityHidden(true)
-                                .geminiSweep(trigger: model.corrected)
+                            partialText
                         } else {
-                            // The edit itself: fillers and self-corrections struck
-                            // out, then closed up. Keyed on the corrected text so a
-                            // second dictation restarts the beats rather than
-                            // reusing the previous view's finished state.
                             CorrectionView(segments: model.correction)
                                 .id(model.corrected)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -141,45 +98,58 @@ struct PillView: View {
                 }
             }
 
-        case .success(let words):
-            successBadge(words: words)
-
         case .notice(let message):
-            pillSurface(width: nil) {
+            bar(width: nil) {
                 Text(message)
-                    .font(JotUI.TypeScale.label())
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Flow.text)
                     .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false) // never truncate — the pill hugs the text
-                    .padding(.horizontal, JotUI.Spacing.xxs)
+                    .fixedSize()
+                    .padding(.horizontal, 4)
             }
 
         case .error(let message):
-            errorChip(message: message)
+            bar(width: nil, edge: Flow.destructive, edgeWidth: 1.5) {
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Flow.text)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 4)
+            }
+            .modifier(ShakeEffect(shakes: reduceMotion ? 0 : 3))
+
+        case .transcript(let text):
+            TranscriptCard(text: text, timeout: PillModel.transcriptTimeout)
         }
     }
 
-    // MARK: - Pieces
+    private var partialText: some View {
+        Text(model.partial)
+            .font(.system(size: 12))
+            .foregroundStyle(Flow.text)
+            .lineLimit(1)
+            .truncationMode(.head)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .animation(nil, value: model.partial)
+            .accessibilityHidden(true)
+            .geminiSweep(trigger: model.corrected)
+    }
 
-    /// Liquid Glass on macOS 26+ (the pill is transient functional UI — exactly
-    /// where the HIG wants glass); a plain Material-surface capsule earlier.
-    /// No borders, no edge glows — the glass edge is the only edge.
-    private func pillSurface<Content: View>(
+    private func bar<Content: View>(
         width: CGFloat?,
-        tint: Color? = nil,
+        edge: Color = Flow.edge,
+        edgeWidth: CGFloat = 1,
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
-            .padding(.horizontal, JotUI.Spacing.m)
-            .frame(width: width, height: 48)
+            .padding(.horizontal, 12)
+            .frame(width: width, height: Flow.height)
             .frame(maxWidth: width == nil ? 560 : nil)
-            // Content is clipped to the capsule, not merely framed by it. A frame
-            // constrains layout but does not stop a child drawing outside it, so
-            // a line of text wider than the pill painted straight across the
-            // surface and past its edge. Every state gets this, not just the one
-            // that happened to overflow first.
+            .background(Capsule().fill(Flow.ink))
+            .overlay(Capsule().strokeBorder(edge, lineWidth: edgeWidth))
             .clipShape(Capsule())
-            .gtGlassCapsule(tint: tint)
+            .transition(.scale(scale: 0.7, anchor: .bottom).combined(with: .opacity))
     }
 
     private var stopButton: some View {
@@ -187,55 +157,15 @@ struct PillView: View {
             NotificationCenter.default.post(name: .pillStopTapped, object: nil)
         } label: {
             ZStack {
-                Circle().fill(JotUI.Colors.primary)
-                RoundedRectangle(cornerRadius: 2.5)
-                    .fill(JotUI.Colors.onPrimary)
-                    .frame(width: 10, height: 10)
+                Circle().fill(Color(white: 0.16))
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Flow.destructive)
+                    .frame(width: 7.5, height: 7.5)
             }
-            .frame(width: 32, height: 32)
+            .frame(width: 18, height: 18)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Stop dictation and insert text")
-    }
-
-    private func successBadge(words: Int?) -> some View {
-        VStack(spacing: JotUI.Spacing.xxs) {
-            CheckmarkShape()
-                .trim(from: 0, to: 1)
-                .stroke(JotUI.Colors.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                .frame(width: 20, height: 20)
-                .frame(width: 48, height: 48)
-                .gtGlassCircle()
-            if let words, words > 20 {
-                Text("\(words) words")
-                    .font(JotUI.TypeScale.labelSmall())
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-            }
-        }
-        .transition(.scale(scale: 0.6).combined(with: .opacity))
-    }
-
-    private func errorChip(message: String) -> some View {
-        HStack(spacing: JotUI.Spacing.xs) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(JotUI.Colors.onErrorContainer)
-            Text(message)
-                .font(JotUI.TypeScale.label())
-                .foregroundStyle(JotUI.Colors.onErrorContainer)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-        .padding(.horizontal, JotUI.Spacing.m)
-        .frame(height: 48)
-        .frame(maxWidth: 560)
-        .gtGlassCapsule(tint: JotUI.Colors.errorContainer)
-        .modifier(ShakeEffect(shakes: reduceMotion ? 0 : 3))
-    }
-
-    private var timerText: String {
-        let seconds = Int(model.elapsed)
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
     private var accessibilityDescription: String {
@@ -247,55 +177,39 @@ struct PillView: View {
         case .success(let words): return "Inserted\(words.map { " \($0) words" } ?? "")"
         case .notice(let message): return message
         case .error(let message): return "Error — \(message)"
+        case .transcript(let text): return "No text field — \(text)"
         }
     }
 }
 
-// MARK: - Idle dot (the invitation)
+// MARK: - Resting bar
 
-/// At rest: a whisper of a capsule. On hover: the SAME capsule inflates into a
-/// mini pill offering dictation — one view identity, one glass surface, so the
-/// shape morphs continuously instead of cutting between two views. The content
-/// blooms in a beat after the surface starts stretching (scale + blur-in), and
-/// the springs are asymmetric: wobbly bloom out, calm settle back. Click starts
-/// hands-free.
-private struct IdleDotView: View {
+/// 40×8 translucent sliver; on hover it opens into the 50×30 black bar with
+/// dim bars. Click starts hands-free.
+private struct RestingBar: View {
     @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// The goo: low damping + longer response = visible squish and overshoot.
-    private static let bloom = Animation.spring(response: 0.45, dampingFraction: 0.55)
-    /// The retreat: goo relaxing, no wobble.
-    private static let settle = Animation.spring(response: 0.30, dampingFraction: 0.85)
-    /// Content arrives after the surface is already stretching.
-    private static let contentBloom = Animation.spring(response: 0.34, dampingFraction: 0.7).delay(0.05)
 
     var body: some View {
         Button {
             NotificationCenter.default.post(name: .pillDotTapped, object: nil)
         } label: {
-            HStack(spacing: JotUI.Spacing.xs) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(JotUI.Colors.gBlue)
-                Text("Dictate")
-                    .font(JotUI.TypeScale.label())
-                    .foregroundStyle(JotUI.Colors.onSurface)
-                    .fixedSize()
+            ZStack {
+                if hovering {
+                    WaveformView(level: 0, processing: true)
+                        .transition(.opacity)
+                }
             }
-            .opacity(hovering ? 1 : 0)
-            .scaleEffect(hovering ? 1 : 0.4)
-            .blur(radius: hovering || reduceMotion ? 0 : 4)
-            .animation(reduceMotion ? .linear(duration: 0.15) : (hovering ? Self.contentBloom : Self.settle), value: hovering)
-            // One frame, continuously morphed — never two views.
-            .frame(width: hovering ? 116 : 40, height: hovering ? 34 : 8)
+            .frame(width: hovering ? 50 : 40, height: hovering ? Flow.height : 8)
             .background(
-                Capsule()
-                    .fill(JotUI.Colors.onSurfaceVariant.opacity(hovering ? 0.04 : 0.18))
+                RoundedRectangle(cornerRadius: hovering ? Flow.height / 2 : 6)
+                    .fill(hovering ? Flow.ink : Color.black.opacity(0.5))
             )
-            .gtGlassCapsule()
-            .contentShape(Capsule().scale(hovering ? 1.2 : 2.4)) // generous hit + hover target
-            .animation(reduceMotion ? .linear(duration: 0.15) : (hovering ? Self.bloom : Self.settle), value: hovering)
+            .overlay(
+                RoundedRectangle(cornerRadius: hovering ? Flow.height / 2 : 6)
+                    .strokeBorder(hovering ? Flow.edgeHover : Color.white.opacity(0.5), lineWidth: 1)
+            )
+            .contentShape(Rectangle().inset(by: -12))
+            .animation(Flow.morph, value: hovering)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -304,51 +218,135 @@ private struct IdleDotView: View {
     }
 }
 
-// MARK: - Glass surface (macOS 26+) with Material fallback
+// MARK: - No text field card
 
-extension View {
-    /// Borderless capsule surface: Liquid Glass on macOS 26+, surface+shadow before.
-    @ViewBuilder
-    func gtGlassCapsule(tint: Color? = nil) -> some View {
-        if #available(macOS 26.0, *) {
-            if let tint {
-                self.glassEffect(.regular.tint(tint.opacity(0.85)), in: .capsule)
-            } else {
-                self.glassEffect(.regular, in: .capsule)
+/// Shown when the transcript had nowhere to go: the words, a Copy button, and
+/// a close button whose ring counts down to dismissal. Hover pauses the clock.
+private struct TranscriptCard: View {
+    let text: String
+    let timeout: TimeInterval
+
+    @State private var copied = false
+    @State private var remaining: Double = 1
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                HStack(spacing: 6) {
+                    JotMark()
+                    Text("Select a textbox first, then dictate")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Flow.hint)
+                }
+                Spacer(minLength: 8)
+                closeButton
+                    .padding(.top, -2)
             }
-        } else {
-            self.background(
-                Capsule()
-                    .fill(tint ?? JotUI.Colors.surface)
-                    .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
-            )
+            .padding(.bottom, 12)
+
+            ScrollView {
+                Text(text)
+                    .font(.system(size: 15))
+                    .lineSpacing(3)
+                    .foregroundStyle(Flow.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(maxHeight: 180)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button(action: copy) {
+                    Text(copied ? "Copied!" : "Copy")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Flow.buttonText)
+                        .padding(.horizontal, 12)
+                        .frame(height: 28)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Flow.button))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 12)
+        }
+        .padding(16)
+        .frame(width: 384)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Flow.ink))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Flow.edge, lineWidth: 1))
+        .onHover { hovering = $0 }
+        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+        .task(id: text) { await countDown() }
+    }
+
+    private var closeButton: some View {
+        Button(action: dismiss) {
+            ZStack {
+                Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1.5)
+                Circle()
+                    .trim(from: 0, to: remaining)
+                    .stroke(Color.white.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(0.75)
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Flow.buttonText)
+            }
+            .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Dismiss")
+    }
+
+    private func countDown() async {
+        let step = 0.05
+        var left = timeout
+        while left > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(step * 1_000_000_000))
+            if Task.isCancelled { return }
+            if !hovering { left -= step }
+            remaining = max(0, left / timeout)
+        }
+        dismiss()
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copied = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            dismiss()
         }
     }
 
-    @ViewBuilder
-    func gtGlassCircle() -> some View {
-        if #available(macOS 26.0, *) {
-            self.glassEffect(.regular, in: .circle)
-        } else {
-            self.background(
-                Circle()
-                    .fill(JotUI.Colors.surface)
-                    .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
-            )
+    private func dismiss() {
+        NotificationCenter.default.post(name: .pillTranscriptDismissed, object: nil)
+    }
+}
+
+/// Jot's mark at 16pt: five bars under the same lens envelope as the waveform.
+private struct JotMark: View {
+    var body: some View {
+        HStack(spacing: 1.5) {
+            ForEach([6.0, 10, 14, 10, 6], id: \.self) { height in
+                RoundedRectangle(cornerRadius: 0.75)
+                    .fill(Flow.buttonText)
+                    .frame(width: 1.5, height: height)
+            }
         }
+        .frame(width: 16, height: 16)
     }
 }
 
 // MARK: - Effects
 
-/// The one deliberately non-M3 gesture: a subtle ±4pt horizontal shake on error.
 private struct ShakeEffect: ViewModifier {
     var shakes: Int
     @State private var animating = false
 
     func body(content: Content) -> some View {
         content
-            .offset(x: animating ? 0 : 0)
             .modifier(ShakeGeometry(travel: 4, shakes: CGFloat(shakes), progress: animating ? 1 : 0))
             .onAppear {
                 withAnimation(.timingCurve(0.36, 0.07, 0.19, 0.97, duration: 0.25)) {
@@ -375,17 +373,9 @@ private struct ShakeGeometry: GeometryEffect {
     }
 }
 
-private struct CheckmarkShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX + rect.width * 0.05, y: rect.midY + rect.height * 0.1))
-        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY - rect.height * 0.12))
-        path.addLine(to: CGPoint(x: rect.maxX - rect.width * 0.02, y: rect.minY + rect.height * 0.15))
-        return path
-    }
-}
-
 extension Notification.Name {
     static let pillStopTapped = Notification.Name("com.ammaar.jot.pill.stop")
     static let pillDotTapped = Notification.Name("com.ammaar.jot.pill.dot")
+    static let pillTranscriptDismissed = Notification.Name("com.ammaar.jot.pill.transcript-dismissed")
 }
+

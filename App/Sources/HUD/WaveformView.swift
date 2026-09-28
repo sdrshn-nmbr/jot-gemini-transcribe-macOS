@@ -14,122 +14,69 @@
 
 import SwiftUI
 
-/// The 5-bar amplitude-reactive waveform (Gemini Live "condensed into a tiny pill").
-/// Live state: Google Blue bars with fast-attack/slow-release smoothing and a calm
-/// idle undulation. Processing state: bars freeze into a silhouette and run the
-/// four-color traveling sweep — the only place the brand quad animates.
+/// Ten 2pt bars under a lens-shaped envelope: each bar's reach falls off as
+/// 1 − d²/48 from the centre, and a 1s swell (1 → 1.2 → 1.5 → 1.1 → 1.3 → 1)
+/// travels outward from the middle at 0.1s per bar.
 struct WaveformView: View {
     var level: Float
     var processing: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static let barWidth: CGFloat = 6
-    private static let gap: CGFloat = 4
-    private static let minHeight: CGFloat = 6
-    private static let maxHeight: CGFloat = 38
-    /// Per-bar personality: center bar leads, neighbors follow.
-    private static let weights: [CGFloat] = [0.6, 0.88, 1.0, 0.8, 0.55]
-    private static let phases: [Double] = [0.0, 0.9, 1.7, 2.6, 3.4]
+    private static let count = 10
+    private static let barWidth: CGFloat = 2
+    private static let gap: CGFloat = 2
+    private static let height: CGFloat = 18
+    private static let swell: [(t: Double, v: Double)] = [(0, 1), (0.2, 1.2), (0.4, 1.5), (0.8, 1.1), (0.9, 1.3), (1, 1)]
 
-    /// Fast-attack / slow-release smoothing (spec §1.4) — reference type so the
-    /// Canvas render loop can mutate it without touching SwiftUI state.
     private final class Smoother {
-        var values: [CGFloat] = [0, 0, 0, 0, 0]
-
-        func step(bar: Int, toward target: CGFloat) -> CGFloat {
-            let current = values[bar]
-            let coefficient: CGFloat = target > current ? 0.38 : 0.09
-            let next = current + (target - current) * coefficient
-            values[bar] = next
-            return next
+        var value: CGFloat = 0
+        func step(toward target: CGFloat) -> CGFloat {
+            value += (target - value) * (target > value ? 0.45 : 0.12)
+            return value
         }
     }
 
     @State private var smoother = Smoother()
 
     var body: some View {
-        if reduceMotion {
-            staticBars
-        } else {
-            // Cap the redraw schedule: the fastest visual term is the 2.4–4.6Hz
-            // per-bar shimmer while listening and a ~0.7Hz chase while
-            // processing, so full display rate buys nothing but main-thread
-            // CoreAnimation commits (~1.4ms each, 60×/s for the whole session).
-            TimelineView(.animation(minimumInterval: processing ? 1.0 / 12.0 : 1.0 / 24.0)) { timeline in
-                Canvas { context, size in
-                    let t = timeline.date.timeIntervalSinceReferenceDate
-                    drawBars(context: &context, size: size, time: t)
-                }
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+            Canvas { context, size in
+                draw(&context, size: size, time: timeline.date.timeIntervalSinceReferenceDate)
             }
-            .frame(width: totalWidth, height: Self.maxHeight)
         }
+        .frame(width: CGFloat(Self.count) * Self.barWidth + CGFloat(Self.count - 1) * Self.gap, height: Self.height)
     }
 
-    private var totalWidth: CGFloat {
-        Self.barWidth * 5 + Self.gap * 4
-    }
-
-    private func drawBars(context: inout GraphicsContext, size: CGSize, time: Double) {
-        let sweep = (time.truncatingRemainder(dividingBy: 1.2)) / 1.2
-        for index in 0..<5 {
-            let height = barHeight(index: index, time: time)
-            let x = CGFloat(index) * (Self.barWidth + Self.gap)
+    private func draw(_ context: inout GraphicsContext, size: CGSize, time: Double) {
+        let loudness = smoother.step(toward: processing ? 0.12 : CGFloat(min(max(level, 0), 1)))
+        let centre = Double(Self.count - 1) / 2
+        let colour: Color = processing ? .white.opacity(0.4) : .white
+        for index in 0..<Self.count {
+            let distance = abs(centre - Double(index))
+            let bulge = max(0, 1 - distance * distance / 48)
+            let lag = Double(index < Self.count / 2 ? index : index - Self.count) * 0.1
+            let swell = reduceMotion ? 1 : Self.swellValue(at: time - lag)
+            let reach = (2 + loudness * 12) * CGFloat(bulge * swell)
+            let barHeight = min(max(reach, Self.barWidth), size.height)
             let rect = CGRect(
-                x: x,
-                y: (size.height - height) / 2,
+                x: CGFloat(index) * (Self.barWidth + Self.gap),
+                y: (size.height - barHeight) / 2,
                 width: Self.barWidth,
-                height: height
+                height: barHeight
             )
-            let path = Path(roundedRect: rect, cornerRadius: Self.barWidth / 2)
-            if processing {
-                // Four-color traveling gradient across the frozen silhouette.
-                let hue = (Double(index) / 5.0 + sweep).truncatingRemainder(dividingBy: 1.0)
-                context.fill(path, with: .color(quadColor(at: hue)))
-            } else {
-                context.fill(path, with: .color(JotUI.Colors.gBlue))
-            }
+            context.fill(Path(roundedRect: rect, cornerRadius: 0.5), with: .color(colour))
         }
     }
 
-    private func barHeight(index: Int, time: Double) -> CGFloat {
-        if processing {
-            // Gentle 4-phase chase between 10 and 22pt, staggered — "thinking".
-            let phase = sin(time * 2 * .pi / 1.4 + Self.phases[index])
-            return 16 + phase * 6
+    private static func swellValue(at time: Double) -> Double {
+        let phase = time - floor(time)
+        for (a, b) in zip(swell, swell.dropFirst()) where phase <= b.t {
+            let progress = (phase - a.t) / (b.t - a.t)
+            let eased = progress * progress * (3 - 2 * progress)
+            return a.v + (b.v - a.v) * eased
         }
-        // Target = level-reactive rise with strong per-bar speech shimmer; the
-        // smoother gives it fast attack (bars leap with your voice) and slow
-        // release (they fall like a VU meter, not a strobe).
-        let shimmer = sin(time * 2 * .pi * (2.4 + Double(index) * 0.55) + Self.phases[index] * 2)
-        let target = CGFloat(level) * Self.weights[index] * (1 + CGFloat(shimmer) * 0.35)
-        let smoothed = smoother.step(bar: index, toward: min(1, max(0, target)))
-        // Idle breathing keeps the pill alive between phrases.
-        let idle = sin(time * 2 * .pi * 0.8 + Self.phases[index]) * 2
-        let height = Self.minHeight + idle + smoothed * (Self.maxHeight - Self.minHeight)
-        return min(Self.maxHeight, max(Self.minHeight, height))
-    }
-
-    private func quadColor(at position: Double) -> Color {
-        // Blue → Red → Yellow → Green loop.
-        let colors = JotUI.Colors.brandQuad
-        let scaled = position * Double(colors.count)
-        return colors[Int(scaled) % colors.count]
-    }
-
-    /// Reduce Motion: static 5-bar level meter, opacity-only response.
-    private var staticBars: some View {
-        HStack(spacing: Self.gap) {
-            ForEach(0..<5, id: \.self) { index in
-                RoundedRectangle(cornerRadius: Self.barWidth / 2)
-                    .fill(processing ? JotUI.Colors.brandQuad[index % 4] : JotUI.Colors.gBlue)
-                    .frame(
-                        width: Self.barWidth,
-                        height: Self.minHeight + Self.weights[index] * 14
-                    )
-                    .opacity(processing ? 0.8 : 0.4 + Double(level) * 0.6)
-            }
-        }
-        .frame(height: Self.maxHeight)
+        return 1
     }
 }
+

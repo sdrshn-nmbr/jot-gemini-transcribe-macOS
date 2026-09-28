@@ -155,6 +155,12 @@ final class DictationController {
                 self?.startHandsFree()
             }
         }
+        NotificationCenter.default.addObserver(forName: .pillTranscriptDismissed, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, case .transcript = self.hud.model.state else { return }
+                self.setPill(Self.restingPill(for: self.coordinator.state))
+            }
+        }
         // Settings must take effect the moment they're flipped — not on the next
         // unrelated pill transition (dogfood: resting-dot toggle "didn't work").
         NotificationCenter.default.addObserver(forName: .gtSettingDidChange, object: nil, queue: .main) { [weak self] note in
@@ -692,9 +698,9 @@ final class DictationController {
             dismissAfter(0.7)
         case .copiedToClipboard:
             earcons.play(.success)
-            showNotice("Copied — press ⌘V to paste", for: 4.0, sound: nil)
+            showTranscriptCard(or: "Copied — press ⌘V to paste")
         case .awaitingChip:
-            showNotice("You switched apps — press ⌘V to paste", for: 5.0, sound: nil)
+            showTranscriptCard(or: "You switched apps — press ⌘V to paste")
         case .heldForSecureField:
             showNotice("Secure input is on — saved to History", for: 4.0, sound: nil)
         case .queuedForRetry:
@@ -799,6 +805,16 @@ final class DictationController {
     private func showError(_ message: String) {
         setPill(.error(message))
         dismissAfter(6.0)
+    }
+
+    /// Wispr's card: the words, a Copy button, and a countdown close.
+    private func showTranscriptCard(or fallback: String) {
+        guard let text = coordinator.lastResult, !text.isEmpty else {
+            showNotice(fallback, for: 4.0, sound: nil)
+            return
+        }
+        dismissTask?.cancel()
+        setPill(.transcript(text))
     }
 
     private func dismissAfter(_ seconds: TimeInterval) {

@@ -65,6 +65,7 @@ public struct DictionaryStore: Sendable {
     public func save(_ entries: [DictionaryEntry]) {
         if let data = try? JSONEncoder().encode(entries) {
             Self.defaults.set(data, forKey: Self.key)
+            NotificationCenter.default.post(name: .gtSyncableDataChanged, object: "dictionary")
         }
     }
 

@@ -21,6 +21,8 @@ enum FontLoader {
     static func registerBundledFonts() {
         let fontURLs = (Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: "Fonts/GoogleSansFlex") ?? [])
             + (Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: "Fonts/GoogleSansCode") ?? [])
+            + (Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: "Fonts/EBGaramond") ?? [])
+            + (Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: "Fonts/Figtree") ?? [])
 
         guard !fontURLs.isEmpty else {
             Log.ui.error("FontLoader: no bundled .ttf files found — falling back to system fonts")

@@ -122,6 +122,7 @@ final class DictationController {
     }
 
     func start() {
+        CloudSync.shared.start()
         if SettingsStore().transcriptionEngine == .local {
             Task.detached(priority: .utility) { _ = try? await ParakeetEngine.shared.prepare() }
         }
@@ -408,11 +409,15 @@ final class DictationController {
     }
 
     func openHistory() {
-        openMainWindow(section: .history)
+        openMainWindow(section: .home)
     }
 
     func openSettings(section: String? = nil) {
-        openMainWindow(section: section.flatMap(MainSection.init(rawValue:)) ?? .general)
+        if let section, let page = MainSection(rawValue: section) {
+            openMainWindow(section: page)
+        } else {
+            openMainWindow(section: .settings, tab: section.flatMap(SettingsTab.init(rawValue:)) ?? .general)
+        }
     }
 
     func openDictionary() {
@@ -424,7 +429,7 @@ final class DictationController {
         presentOnboarding()
     }
 
-    private func openMainWindow(section: MainSection) {
+    private func openMainWindow(section: MainSection, tab: SettingsTab? = nil) {
         if mainWindow == nil {
             mainWindow = MainWindowController(
                 store: historyStore,
@@ -467,7 +472,7 @@ final class DictationController {
                 }
             )
         }
-        mainWindow?.show(section: section)
+        mainWindow?.show(section: section, tab: tab)
     }
 
     /// UI-initiated hands-free session (idle-dot click, menu item). Note: the

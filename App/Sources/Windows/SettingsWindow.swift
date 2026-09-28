@@ -24,7 +24,6 @@ import JotCore
 final class MainWindowController: NSWindowController {
     private var hosting: NSHostingView<MainView>?
     private let model: MainWindowModel
-    private var titleObserver: AnyCancellable?
 
     init(
         store: HistoryStore?,
@@ -33,20 +32,16 @@ final class MainWindowController: NSWindowController {
     ) {
         model = MainWindowModel()
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 880, height: 580),
+            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = model.selection.title
+        window.title = "Jot"
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.center()
         super.init(window: window)
-        // System Settings idiom: the titlebar names the selected pane (the app
-        // name already anchors the sidebar header).
-        titleObserver = model.$selection.sink { [weak window] section in
-            window?.title = section.title
-        }
         window.contentView = NSHostingView(rootView: MainView(
             model: model,
             store: store,
@@ -58,169 +53,11 @@ final class MainWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(section: MainSection) {
+    func show(section: MainSection, tab: SettingsTab? = nil) {
         model.selection = section
+        if let tab { model.settingsTab = tab }
         showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
-    }
-}
-
-enum MainSection: String, CaseIterable, Identifiable {
-    case history, dictionary
-    case general, dictation, privacy, advanced
-    case about
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .history: return "History"
-        case .dictionary: return "Dictionary"
-        case .general: return "General"
-        case .dictation: return "Dictation"
-        case .privacy: return "Privacy & Storage"
-        case .advanced: return "Advanced"
-        case .about: return "About"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .history: return "clock.arrow.circlepath"
-        case .dictionary: return "character.book.closed.fill"
-        case .general: return "gearshape.fill"
-        case .dictation: return "waveform"
-        case .privacy: return "hand.raised.fill"
-        case .advanced: return "wrench.and.screwdriver.fill"
-        case .about: return "info.circle.fill"
-        }
-    }
-
-    var tileColor: Color {
-        switch self {
-        case .history: return JotUI.Colors.gBlue
-        case .dictionary: return Color(nsColor: .systemOrange)
-        case .general: return Color(nsColor: .systemGray)
-        case .dictation: return Color(nsColor: .systemTeal)
-        case .privacy: return Color(nsColor: .systemGreen)
-        case .advanced: return Color(nsColor: .systemIndigo)
-        case .about: return Color(nsColor: .systemPink)
-        }
-    }
-
-    static let dataSections: [MainSection] = [.history, .dictionary]
-    static let settingsSections: [MainSection] = [.general, .dictation, .privacy, .advanced, .about]
-}
-
-@MainActor
-final class MainWindowModel: ObservableObject {
-    @Published var selection: MainSection = .history
-}
-
-private struct MainView: View {
-    @ObservedObject var model: MainWindowModel
-    let store: HistoryStore?
-    let onRetry: (DictationRecord) -> Void
-    let onDeleteAllHistory: () -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            Divider()
-            detail
-        }
-        .frame(minWidth: 880, minHeight: 580)
-    }
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Jot")
-                .font(JotUI.TypeScale.title())
-                .padding(.horizontal, 14)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-            ForEach(MainSection.dataSections) { section in
-                SidebarRow(section: section, selected: model.selection == section) {
-                    model.selection = section
-                }
-            }
-            Text("Settings")
-                .font(JotUI.TypeScale.labelSmall())
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 16)
-                .padding(.bottom, 4)
-            ForEach(MainSection.settingsSections) { section in
-                SidebarRow(section: section, selected: model.selection == section) {
-                    model.selection = section
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 8)
-        .frame(width: 210)
-        .background(.thickMaterial)
-    }
-
-    @ViewBuilder
-    private var detail: some View {
-        Group {
-            switch model.selection {
-            case .history:
-                if let store {
-                    HistoryPane(store: store, onRetry: onRetry)
-                } else {
-                    ContentUnavailableView("History unavailable", systemImage: "clock.badge.exclamationmark")
-                }
-            case .dictionary:
-                DictionaryView()
-            case .general:
-                GeneralPane().formStyle(.grouped)
-            case .dictation:
-                DictationPane().formStyle(.grouped)
-            case .privacy:
-                PrivacyPane(onDeleteAllHistory: onDeleteAllHistory).formStyle(.grouped)
-            case .advanced:
-                AdvancedPane().formStyle(.grouped)
-            case .about:
-                AboutPane()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-}
-
-private struct SidebarRow: View {
-    let section: MainSection
-    let selected: Bool
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: section.icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(section.tileColor))
-                Text(section.title)
-                    .font(JotUI.TypeScale.body())
-                    .foregroundStyle(selected ? Color.white : .primary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: JotUI.Radius.small)
-                    .fill(selected ? JotUI.Colors.primary
-                          : hovering ? Color.primary.opacity(JotUI.StateLayer.hover)
-                          : .clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -310,7 +147,7 @@ struct DictationPane: View {
 
     var body: some View {
         Form {
-            StyleSections()
+            EngineSection()
 
             Section {
                 Toggle("Sounds", isOn: $sounds)

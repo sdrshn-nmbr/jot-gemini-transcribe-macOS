@@ -56,8 +56,10 @@ public enum StyleProfiles {
         )
         var result = recapitalizeSentenceStarts(stripped.trimmingCharacters(in: .whitespacesAndNewlines))
         switch style {
-        case .formal, .casual:
+        case .formal:
             break
+        case .casual:
+            if isSingleSentence(result), result.hasSuffix("."), !result.hasSuffix("..") { result.removeLast() }
         case .veryCasual:
             result = lowercaseSentenceStarts(result)
             if result.hasSuffix("."), !result.hasSuffix("..") { result.removeLast() }
@@ -66,6 +68,10 @@ public enum StyleProfiles {
     }
 
     /// Filler removal can leave "uh make it" as "make it" at a sentence start.
+    private static func isSingleSentence(_ text: String) -> Bool {
+        text.dropLast().allSatisfy { !".!?".contains($0) }
+    }
+
     private static func recapitalizeSentenceStarts(_ text: String) -> String {
         mapSentenceStarts(text) { $0.uppercased() }
     }
@@ -114,4 +120,3 @@ public enum StyleProfiles {
         }
     }
 }
-

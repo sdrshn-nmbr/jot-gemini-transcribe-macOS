@@ -28,6 +28,12 @@ final class StyleProfilesTests: XCTestCase {
         XCTAssertEqual(StyleProfiles.format(text, style: .formal), text)
     }
 
+    func testCasualDropsTheFinalPeriodOnlyOnOneSentenceMessages() {
+        XCTAssertEqual(StyleProfiles.format("Save me a seat.", style: .casual), "Save me a seat")
+        XCTAssertEqual(StyleProfiles.format("Save me a seat. See you soon.", style: .casual), "Save me a seat. See you soon.")
+        XCTAssertEqual(StyleProfiles.format("Save me a seat.", style: .formal), "Save me a seat.")
+    }
+
     func testVeryCasualLowercasesButKeepsINamesAndAcronyms() {
         XCTAssertEqual(
             StyleProfiles.format("Sounds good. I'll ship the PR. ClickHouse is up.", style: .veryCasual),

@@ -62,35 +62,54 @@ struct SettingsPage: View {
     }
 }
 
-/// iCloud Drive sync for everything you teach Jot.
+/// Private Cloud Sync through your iCloud Drive.
 struct SyncPane: View {
     private let sync = CloudSync.shared
     @State private var enabled = CloudSync.shared.isEnabled
+    @State private var history = UserDefaults.standard.bool(forKey: "historySyncEnabled")
     @State private var status = CloudSync.shared.status
 
     var body: some View {
         Form {
             Section {
-                Toggle("Sync with iCloud Drive", isOn: $enabled)
-                    .disabled(!sync.isAvailable)
-                    .onChange(of: enabled) { _, value in
-                        sync.setEnabled(value)
-                        status = sync.status
+                Toggle(isOn: $enabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Private Cloud Sync")
+                        Text("Keep your notes and preferences synced through your iCloud Drive.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                }
+                .disabled(!sync.isAvailable)
+                .onChange(of: enabled) { _, value in
+                    sync.setEnabled(value)
+                    status = sync.status
+                }
+                Toggle(isOn: $history) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Dictation cloud storage")
+                        Text("Stores your transcripts and dictation history in iCloud Drive so every Mac shows the same history. Audio stays on the Mac that recorded it.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!enabled)
+                .onChange(of: history) { _, value in
+                    sync.setHistoryEnabled(value)
+                    status = sync.status
+                }
                 LabeledContent("Status", value: statusText)
                 if enabled {
                     HStack {
                         Button("Sync Now") {
-                            sync.pullThenPush()
+                            sync.syncNow()
                             status = sync.status
                         }
                         Button("Show in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([CloudSync.fileURL])
+                            NSWorkspace.shared.activateFileViewerSelecting([CloudSync.folder])
                         }
                     }
                 }
             } footer: {
-                Text("Your dictionary, snippets, styles, app groups and scratchpad are kept in a Jot folder in your iCloud Drive, so every Mac signed in to your Apple ID shares them. It never leaves your Apple account. Recordings and dictation history stay on this Mac.")
+                Text("Syncs your dictionary, snippets, styles, app groups and Scratchpad notes to a Jot folder in your iCloud Drive. Nothing passes through any server except Apple's, and you can turn it off anytime.")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
@@ -102,11 +121,11 @@ struct SyncPane: View {
     private var statusText: String {
         guard sync.isAvailable else { return "iCloud Drive is off on this Mac" }
         switch status {
-        case .off: return enabled ? "Waiting for the first sync" : "Off"
+        case .off: return "Off"
         case .unavailable: return "iCloud Drive is off on this Mac"
+        case .waiting: return "Waiting for the first sync"
         case .synced(let date): return "Synced \(date.formatted(.relative(presentation: .named)))"
         case .failed(let message): return message
         }
     }
 }
-

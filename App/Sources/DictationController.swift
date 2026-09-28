@@ -94,7 +94,7 @@ final class DictationController {
         coordinator = DictationCoordinator(
             audioFactory: { [warmEngines] in warmEngines.take() },
             transcription: service,
-            insertion: InsertionCoordinator(),
+            insertion: AppInserter(),
             contextProvider: {
                 let app = NSWorkspace.shared.frontmostApplication
                 // Wake Electron/Chromium a11y NOW, while the user is still
@@ -122,7 +122,8 @@ final class DictationController {
     }
 
     func start() {
-        CloudSync.shared.start()
+        CloudSync.shared.start(history: historyStore)
+        ScratchpadWindowController.shared.registerHotKey()
         if SettingsStore().transcriptionEngine == .local {
             Task.detached(priority: .utility) { _ = try? await ParakeetEngine.shared.prepare() }
         }

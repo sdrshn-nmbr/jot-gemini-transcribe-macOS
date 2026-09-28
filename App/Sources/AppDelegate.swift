@@ -137,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             case "start-hands-free": self?.dictationController?.startHandsFree()
+            case "scratchpad": ScratchpadWindowController.shared.open()
             case "stop": self?.dictationController?.coordinator.handle(.finalize)
             #if DEBUG
             // jot://set/<key>/<true|false> — flips a boolean setting through

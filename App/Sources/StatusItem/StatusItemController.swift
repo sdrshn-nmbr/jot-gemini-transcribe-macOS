@@ -156,6 +156,9 @@ final class StatusItemController: NSObject {
         pasteLast.target = self
         menu.addItem(pasteLast)
 
+        let scratchpad = NSMenuItem(title: "Open Scratchpad", action: #selector(openScratchpad), keyEquivalent: "")
+        scratchpad.target = self
+        menu.addItem(scratchpad)
         let history = NSMenuItem(title: "History…", action: #selector(openHistory), keyEquivalent: "")
         history.target = self
         menu.addItem(history)
@@ -184,6 +187,10 @@ final class StatusItemController: NSObject {
         menu.addItem(quit)
 
         return menu
+    }
+
+    @MainActor @objc private func openScratchpad() {
+        ScratchpadWindowController.shared.open()
     }
 
     @objc private func openHistory() {

@@ -39,6 +39,10 @@ public actor ParakeetEngine {
                 encoderHiddenSize: version.encoderHiddenSize
             ))
             try await asr.loadModels(models)
+            // The first inference compiles the Neural Engine graph (~350 ms);
+            // pay it here instead of on your first dictation.
+            var warmState = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+            _ = try? await asr.transcribe([Float](repeating: 0, count: 16_000), decoderState: &warmState)
             Log.transcription.info("parakeet ready in \(Int(Date().timeIntervalSince(started) * 1000))ms")
             return asr
         }
@@ -56,8 +60,13 @@ public actor ParakeetEngine {
     }
 
     public func transcribe(audioURL: URL) async throws -> String {
+        try await transcribe(samples: AudioConverter().resampleAudioFile(audioURL))
+    }
+
+    /// 16 kHz mono samples in, text out.
+    public func transcribe(samples input: [Float]) async throws -> String {
         let asr = try await prepare()
-        var samples = try AudioConverter().resampleAudioFile(audioURL)
+        var samples = input
         // Parakeet refuses clips under its minimum window; a one-word "Continue."
         // is shorter than that. Trailing silence costs nothing and keeps short
         // dictations local.

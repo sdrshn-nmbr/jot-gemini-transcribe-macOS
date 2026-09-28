@@ -106,7 +106,7 @@ public final class AudioCaptureEngine: AudioCapturing {
             // Prewarm is an optimization, never a failure mode — the session's
             // own start() will build fresh and report any real problem.
             Log.audio.info("prewarm skipped: \(String(describing: error), privacy: .public)")
-            tearDownEngine()
+            tearDownEngine(stopInBackground: true)
             isPrewarmed = false
         }
     }
@@ -307,12 +307,19 @@ public final class AudioCaptureEngine: AudioCapturing {
         }
     }
 
-    private func tearDownEngine() {
+    /// `stopInBackground`: at key-up the tap is removed at once — no more audio
+    /// arrives — but `AVAudioEngine.stop()` takes ~70 ms and nothing after it
+    /// depends on it, so it runs off the path to your words.
+    private func tearDownEngine(stopInBackground: Bool = false) {
         // A stop() parked on the tail must never outlive the engine.
         resumeTailWaiter()
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
+            if stopInBackground {
+                DispatchQueue.global(qos: .utility).async { engine.stop() }
+            } else {
+                engine.stop()
+            }
         }
         engine = nil
         converter = nil

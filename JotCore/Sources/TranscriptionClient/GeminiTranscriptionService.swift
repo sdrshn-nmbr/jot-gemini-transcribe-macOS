@@ -205,7 +205,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     /// output fails the gate; the local path passes its own formatted text.
     func cleanupOrFallback(
         raw: String, fallback: String? = nil, context: DictationContext,
-        config: GeminiConfig, style: String? = nil
+        config: GeminiConfig, style: String? = nil, groq: GroqClient? = nil
     ) async -> String {
         let tone = PromptV1.toneCategory(forBundleID: context.targetAppBundleID)
         let dictionary = DictionaryStore()
@@ -216,27 +216,48 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             vocabulary: dictionary.sanitizedVocabulary(),
             spellings: dictionary.spellings()
         )
-        do {
-            let response = try await client.cleanup(
-                prompt: prompt, model: config.cleanupModel,
-                endpoint: config.endpoint, deadline: Self.cleanupDeadline
-            )
-            let cleaned = ValidationGate.stripArtifacts(response)
-            let verdict = ValidationGate.validate(raw: raw, cleaned: cleaned)
-            guard verdict.accepted else {
-                let trips = settings.recordGateTrip()
-                Log.transcription.warning("cleanup gate REJECTED (\(verdict.reason ?? "?", privacy: .public), trip #\(trips) in 24h) — inserting raw")
-                autoDegradeIfNeeded(trips: trips)
-                return Self.applyDictionary(to: fallback ?? raw, dictionary)
+        // Every configured model gets the same prompt at once; the first answer
+        // that passes the gate is used and the rest are cancelled.
+        let client = self.client
+        let deadline = Self.cleanupDeadline
+        let started = Date()
+        let winner: (text: String, model: String)? = await withTaskGroup(of: (String, String)?.self) { group in
+            group.addTask {
+                guard let text = try? await client.cleanup(prompt: prompt, model: config.cleanupModel, endpoint: config.endpoint, deadline: deadline) else { return nil }
+                return (text, config.cleanupModel)
             }
-            // The dictionary's hard guarantee: explicit wrong→right rules always win.
-            return Self.applyDictionary(to: cleaned, dictionary)
-        } catch {
+            if let groq, groq.isConfigured {
+                group.addTask {
+                    guard let text = try? await groq.rewrite(prompt: prompt, deadline: deadline) else { return nil }
+                    return (text, GroqClient.model)
+                }
+            }
+            var rejected = false
+            for await answer in group {
+                guard let (text, model) = answer else { continue }
+                let cleaned = ValidationGate.stripArtifacts(text)
+                if ValidationGate.validate(raw: raw, cleaned: cleaned).accepted {
+                    group.cancelAll()
+                    return (cleaned, model)
+                }
+                rejected = true
+            }
+            if rejected {
+                let trips = settings.recordGateTrip()
+                Log.transcription.warning("cleanup gate REJECTED every answer (trip #\(trips) in 24h) — inserting raw")
+                autoDegradeIfNeeded(trips: trips)
+            }
+            return nil
+        }
+        guard let winner else {
             // Deadline miss / network hiccup on cleanup never costs the dictation —
             // and the dictionary guarantee still holds (audit L9).
-            Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")
+            Log.transcription.info("cleanup unavailable — inserting the local text")
             return Self.applyDictionary(to: fallback ?? raw, dictionary)
         }
+        Log.transcription.info("cleanup by \(winner.model, privacy: .public) in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+        // The dictionary's hard guarantee: explicit wrong→right rules always win.
+        return Self.applyDictionary(to: winner.text, dictionary)
     }
 
     /// F11 auto-degrade (audit L10): three gate trips in 24h means cleanup can't

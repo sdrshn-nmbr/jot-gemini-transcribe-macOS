@@ -35,10 +35,31 @@ public enum StyleProfiles {
         "com.facebook.archon": .personal,
     ]
 
-    /// Phrases that mean the words as spoken are not the words wanted.
-    private static let rewriteCues = try! NSRegularExpression(
-        pattern: #"\b(actually|scratch that|i mean|no wait|wait no|sorry|rather|correction|new line|newline|new paragraph|period|full stop|comma|question mark|exclamation (?:point|mark)|colon|semicolon|open (?:paren|quote)|close (?:paren|quote)|bullet|number (?:one|two|three|1|2|3)|first(?:ly)?,? second(?:ly)?)\b"#,
-        options: [.caseInsensitive]
+    /// Phrases that mean the words as spoken are not the words wanted. Each is
+    /// narrowed to the way people correct themselves: "actually" only where it
+    /// opens a clause or precedes a number, never "is actually usable"; "or
+    /// rather", never "rather than". On 68 real dictations the broad words sent
+    /// 12 to the model and only 3 were corrections.
+    private static let rewriteCues: [NSRegularExpression] = [
+        #"(?:^|[.,;:!?]\s*)actually\b"#,
+        #"\bactually,?\s+(?:no\b|make (?:that|it)\b|change\b|\d)"#,
+        #"\bscratch that\b"#,
+        #"\b(?:no|wait),?\s+(?:no|wait)\b"#,
+        #"\bI meant\b"#,
+        #"\b(?:sorry|no),?\s+I mean\b"#,
+        #"\bor rather\b"#,
+        #"(?:^|[.,;]\s*)correction\b"#,
+        #"\bnew ?(?:line|paragraph)\b"#,
+        #"\b(?:question mark|exclamation (?:point|mark)|full stop|semicolon|bullet point)\b"#,
+        #"\b(?:open|close) (?:paren|parenthesis|quote|bracket)\b"#,
+        #"\bcomma\b"#,
+        #"(?<!\b(?:a|the|this|that|time|grace|trial|waiting|billing|same|short|long|any|each|free)\s)\bperiod\b"#,
+    ].map { try! NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+
+    /// A spoken list needs at least two numbered items; "number one priority"
+    /// alone is ordinary speech.
+    private static let listItem = try! NSRegularExpression(
+        pattern: #"\bnumber (?:one|two|three|four|five|[1-5])\b"#, options: [.caseInsensitive]
     )
 
     private static let fillers = try! NSRegularExpression(
@@ -47,7 +68,51 @@ public enum StyleProfiles {
     )
 
     public static func needsRewrite(_ text: String) -> Bool {
-        rewriteCues.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+        let range = NSRange(text.startIndex..., in: text)
+        if rewriteCues.contains(where: { $0.firstMatch(in: text, range: range) != nil }) { return true }
+        return listItem.numberOfMatches(in: text, range: range) >= 2
+    }
+
+    /// The part of a dictation the model should rewrite, with the untouched
+    /// sentences either side. A correction reaches back one sentence at most,
+    /// so a two-minute dictation with one "scratch that" sends two sentences to
+    /// the model instead of all of them — the rewrite time stops growing with
+    /// the length of what you said.
+    public struct RewriteWindow: Equatable {
+        public let prefix: String
+        public let target: String
+        public let suffix: String
+    }
+
+    public static func rewriteWindow(_ text: String) -> RewriteWindow? {
+        let sentences = splitSentences(text)
+        let flagged = sentences.indices.filter { needsRewrite(sentences[$0]) }
+        let lists = sentences.indices.filter { index in
+            listItem.firstMatch(in: sentences[index], range: NSRange(sentences[index].startIndex..., in: sentences[index])) != nil
+        }
+        let hits = flagged + (lists.count >= 2 ? lists : [])
+        guard let first = hits.min(), let last = hits.max() else {
+            return needsRewrite(text) ? RewriteWindow(prefix: "", target: text, suffix: "") : nil
+        }
+        let start = max(0, first - 1)
+        let end = min(sentences.count - 1, lists.count >= 2 && last == lists.max() ? last + 1 : last)
+        if end - start + 1 >= sentences.count - 1 {
+            return RewriteWindow(prefix: "", target: text, suffix: "")
+        }
+        return RewriteWindow(
+            prefix: sentences[..<start].joined(),
+            target: sentences[start...end].joined(),
+            suffix: sentences[(end + 1)...].joined()
+        )
+    }
+
+    /// Sentences with their trailing punctuation and spaces kept, so joining
+    /// them gives back the original text exactly.
+    static func splitSentences(_ text: String) -> [String] {
+        let pattern = try! NSRegularExpression(pattern: #"[^.!?]+(?:[.!?]+|$)\s*"#)
+        let matches = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        let pieces = matches.compactMap { Range($0.range, in: text).map { String(text[$0]) } }
+        return pieces.joined() == text ? pieces : [text]
     }
 
     public static func format(_ text: String, style: WritingStyle) -> String {

@@ -49,17 +49,23 @@ public struct HybridTranscriptionService: TranscriptionServicing {
             Log.transcription.error("local transcription FAILED (\(String(describing: error), privacy: .public)) — falling back to Gemini")
             return try await gemini.transcribe(audioURL: audioURL, durationSeconds: durationSeconds, context: context)
         }
+        return try await finish(raw: raw, context: context)
+    }
 
+    /// Style, dictionary and — only when the speech asks for it — a model
+    /// rewrite of the sentences around a correction. Shared by the file path
+    /// and the streaming path.
+    public func finish(raw: String, context: DictationContext) async throws -> TranscriptionResult {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw TranscriptionError.emptyTranscript }
 
         let style = settings.style(for: settings.appGroup(forBundleID: context.targetAppBundleID))
         let local = StyleProfiles.format(trimmed, style: style)
 
-        let wantsModel = settings.smartTranscriptionEnabled
-            && StyleProfiles.needsRewrite(trimmed)
-            && KeychainStore.loadAPIKey() != nil
-        guard wantsModel else {
+        let groq = GroqClient(apiKey: { KeychainStore.loadGroqKey() })
+        guard settings.smartTranscriptionEnabled,
+              let window = StyleProfiles.rewriteWindow(trimmed),
+              KeychainStore.loadAPIKey() != nil || groq.isConfigured else {
             return TranscriptionResult(
                 rawTranscript: trimmed,
                 cleanedTranscript: GeminiTranscriptionService.applyDictionary(to: local),
@@ -68,14 +74,22 @@ public struct HybridTranscriptionService: TranscriptionServicing {
         }
 
         let config = settings.geminiConfig
-        let cleaned = await gemini.cleanupOrFallback(
-            raw: trimmed, fallback: local, context: context, config: config,
-            style: StyleProfiles.promptBlock(for: style)
+        let rewritten = await gemini.cleanupOrFallback(
+            raw: window.target, fallback: StyleProfiles.format(window.target, style: style),
+            context: context, config: config,
+            style: StyleProfiles.promptBlock(for: style), groq: groq
         )
+        let joined = [window.prefix, window.suffix].allSatisfy(\.isEmpty)
+            ? rewritten
+            : [GeminiTranscriptionService.applyDictionary(to: window.prefix), rewritten, GeminiTranscriptionService.applyDictionary(to: window.suffix)]
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        let cleaned = [window.prefix, window.suffix].allSatisfy(\.isEmpty) ? joined : StyleProfiles.format(joined, style: style)
         return TranscriptionResult(
             rawTranscript: trimmed,
             cleanedTranscript: cleaned,
-            modelID: "parakeet-v2+\(config.cleanupModel)"
+            modelID: "parakeet-v2+cleanup"
         )
     }
 }

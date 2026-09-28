@@ -54,6 +54,17 @@ final class DictationController {
     @MainActor
     private static func makeLiveSession() -> LiveTranscribing? {
         let settings = SettingsStore()
+        if settings.transcriptionEngine == .local {
+            let app = NSWorkspace.shared.frontmostApplication
+            let context = DictationContext(
+                targetAppBundleID: app?.bundleIdentifier,
+                targetAppName: app?.localizedName,
+                targetPID: app?.processIdentifier
+            )
+            let client = GeminiClient(apiKey: { KeychainStore.loadAPIKey() })
+            let service = HybridTranscriptionService(gemini: GeminiTranscriptionService(client: client))
+            return ParakeetStreamer { raw in try await service.finish(raw: raw, context: context) }
+        }
         guard settings.liveTranscriptionActive, settings.transcriptionEngine == .gemini else { return nil }
         // A live path that is reliably broken is worse than one that is off: every
         // attempt costs a handshake and then the full upload anyway, so the user
@@ -568,6 +579,9 @@ final class DictationController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] text in
                 guard let self else { return }
+                // Local streaming has no words to show until it is done; the
+                // bar stays the compact one.
+                guard SettingsStore().transcriptionEngine == .gemini else { return }
                 // The session ends immediately after the correction lands, which
                 // clears this — and clearing it mid-sweep means the animation the
                 // whole treatment exists for is never actually seen. How long the
@@ -581,7 +595,7 @@ final class DictationController {
         coordinator.$correctedTranscript
             .receive(on: DispatchQueue.main)
             .sink { [weak self] text in
-                guard let self, !text.isEmpty else { return }
+                guard let self, !text.isEmpty, SettingsStore().transcriptionEngine == .gemini else { return }
                 self.hud.model.corrected = text
                 self.hud.model.correction = self.coordinator.correctionSegments
                 // An edit needs longer on screen than a plain swap: the marked

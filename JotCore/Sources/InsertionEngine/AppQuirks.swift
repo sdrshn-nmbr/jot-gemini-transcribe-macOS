@@ -51,4 +51,22 @@ public enum AppQuirks {
         "com.linear",
         "com.figma.Desktop",
     ]
+
+    /// Apps that accepted an accessibility write but never showed the text —
+    /// learned per Mac. Each such attempt costs ~120 ms of polling before the
+    /// paste that actually works, so after the first one those apps skip
+    /// straight to paste.
+    private static let learnedKey = "insertionPasteFirst"
+
+    public static func prefersPaste(_ bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return (UserDefaults.standard.stringArray(forKey: learnedKey) ?? []).contains(bundleID)
+    }
+
+    public static func learnPasteFirst(_ bundleID: String?) {
+        guard let bundleID, !prefersPaste(bundleID) else { return }
+        let learned = (UserDefaults.standard.stringArray(forKey: learnedKey) ?? []) + [bundleID]
+        UserDefaults.standard.set(learned, forKey: learnedKey)
+        Log.insertion.info("\(bundleID, privacy: .public) ignores accessibility writes — pasting first from now on")
+    }
 }

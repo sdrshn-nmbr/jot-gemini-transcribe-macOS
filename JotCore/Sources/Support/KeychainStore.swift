@@ -53,6 +53,38 @@ public enum KeychainStore {
         return (key?.isEmpty ?? true) ? nil : key
     }
 
+    /// Optional Groq key for faster correction rewrites. Login keychain only,
+    /// read and written through `security` like the Gemini key.
+    public static func loadGroqKey() -> String? {
+        if let cached = groqCache.value { return cached.isEmpty ? nil : cached }
+        let key = SecurityTool.run(["find-generic-password", "-s", service, "-a", "groq-api-key", "-w"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        groqCache.value = key ?? ""
+        return (key?.isEmpty ?? true) ? nil : key
+    }
+
+    @discardableResult
+    public static func saveGroqKey(_ key: String) -> Bool {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            _ = SecurityTool.run(["delete-generic-password", "-s", service, "-a", "groq-api-key"])
+            groqCache.value = ""
+            NotificationCenter.default.post(name: .gtSettingDidChange, object: "groqKey")
+            return true
+        }
+        let escaped = trimmed.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let command = "add-generic-password -U -s \(service) -a groq-api-key -l \"Jot — Groq API key\" -T /usr/bin/security -w \"\(escaped)\"\n"
+        guard SecurityTool.run(["-i"], stdin: command) != nil else {
+            Log.permissions.error("KeychainStore: Groq key save FAILED")
+            return false
+        }
+        groqCache.value = trimmed
+        NotificationCenter.default.post(name: .gtSettingDidChange, object: "groqKey")
+        return true
+    }
+
+    private static let groqCache = Cache()
+
     /// Builds signed without an Apple team ID get a new keychain partition on
     /// every rebuild, so reading the login keychain directly asks for the
     /// password after each update. Apple's `security` tool keeps a stable

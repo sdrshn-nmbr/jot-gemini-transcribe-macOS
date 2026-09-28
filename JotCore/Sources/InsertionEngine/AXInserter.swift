@@ -123,6 +123,7 @@ public enum AXInserter {
         // prove the insert landed, so we fall to paste rather than risk a double.
         guard let before else { return .notPossible }
         guard settable.boolValue else { return .notPossible }
+        if AppQuirks.prefersPaste(bundleID) { return .notPossible }
         guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success else {
             return .notPossible
         }
@@ -144,6 +145,7 @@ public enum AXInserter {
         }
         if !landed {
             Log.insertion.info("AXInserter: set reported success but value unchanged after re-check — falling to paste")
+            AppQuirks.learnPasteFirst(bundleID)
         }
         return landed ? .landed : .notPossible
     }

@@ -305,6 +305,8 @@ struct DictationPane: View {
     @State private var showIdleDot = SettingsStore().showIdleIndicator
     @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
     @State private var liveTranscription = SettingsStore().liveTranscription
+    @State private var toClipboard = SettingsStore().dictateToClipboard
+    @State private var keepClipboard = SettingsStore().keepOnClipboard
 
     var body: some View {
         Form {
@@ -315,6 +317,15 @@ struct DictationPane: View {
                     .onChange(of: showIdleDot) { _, show in settings.setShowIdleIndicator(show) }
             } footer: {
                 Text("The resting dot grows into a Dictate button on hover; click it for hands-free. Off = the pill appears only while dictating.")
+            }
+
+            Section {
+                Toggle("Keep the last dictation on the clipboard", isOn: $keepClipboard)
+                    .onChange(of: keepClipboard) { _, enabled in settings.setKeepOnClipboard(enabled) }
+                Toggle("Copy to clipboard instead of typing", isOn: $toClipboard)
+                    .onChange(of: toClipboard) { _, enabled in settings.setDictateToClipboard(enabled) }
+            } footer: {
+                Text("Keep leaves each transcript on the clipboard after typing it, so the last thing you said is always re-pasteable — at the cost of whatever you had copied before. Instead of typing skips insertion altogether, for remote desktops, VMs and canvas apps. Either way, Jot still copies on its own when it can see there's no text field to type into.")
             }
 
             Section {
